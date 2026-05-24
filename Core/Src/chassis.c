@@ -1,0 +1,125 @@
+#include "chassis.h"
+
+velocity_t chassis_velocity = {0};
+
+/* ========== Modbus CRC-16 ========== */
+uint16_t emm_crc16(uint8_t *data, uint8_t len)
+{
+    uint16_t crc = 0xFFFF;
+    for (uint8_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (uint8_t j = 0; j < 8; j++) {
+            if (crc & 0x0001)
+                crc = (crc >> 1) ^ 0xA001;
+            else
+                crc >>= 1;
+        }
+    }
+    return crc;
+}
+
+/* ========== Send speed command to Emm_V5.0 (0xF6) ==========
+ * addr:   motor address (0x00-0xFF)
+ * speed:  signed speed in 0.1 RPM (e.g. 500 = 50.0 RPM)
+ *         positive = CW, negative = CCW (bit0 of speed byte)
+ * accel:  acceleration in 1 step/s² (0=instant)
+ */
+void emm_send_speed(UART_HandleTypeDef *huart, uint8_t addr, int16_t speed, uint8_t accel)
+{
+    uint8_t frame[9];
+    frame[0] = addr;
+    frame[1] = 0xF6;           /* Speed control function code */
+    frame[2] = 0x00;           /* Default flag */
+    frame[3] = (uint8_t)((speed >> 8) & 0xFF);  /* Speed high byte */
+    frame[4] = (uint8_t)(speed & 0xFF);         /* Speed low byte */
+    frame[5] = accel;                           /* Acceleration */
+    frame[6] = 0x00;           /* Sync flag (0=execute immediately) */
+
+    uint16_t crc = emm_crc16(frame, 7);
+    frame[7] = (uint8_t)(crc & 0xFF);        /* CRC low */
+    frame[8] = (uint8_t)((crc >> 8) & 0xFF); /* CRC high */
+
+    HAL_UART_Transmit(huart, frame, 9, 20);
+}
+
+/* ========== Stop motor (0xFE) ==========
+ * addr: motor address
+ * lock: true=lock rotor, false=free rotor
+ */
+void emm_stop(UART_HandleTypeDef *huart, uint8_t addr, bool lock)
+{
+    uint8_t frame[6];
+    frame[0] = addr;
+    frame[1] = 0xFE;  /* Stop command */
+    frame[2] = 0x98;  /* Sub-command for stop */
+    frame[3] = lock ? 0x01 : 0x00;
+
+    uint16_t crc = emm_crc16(frame, 4);
+    frame[4] = (uint8_t)(crc & 0xFF);
+    frame[5] = (uint8_t)((crc >> 8) & 0xFF);
+
+    HAL_UART_Transmit(huart, frame, 6, 10);
+}
+
+/* Convert m/s to 0.1 RPM for Emm_V5.0 */
+static int16_t speed_to_cmd(float speed_ms)
+{
+    /* v = 2*pi*R*RPM/60  =>  RPM = v*60/(2*pi*R)
+     * cmd = RPM*10 = v*600/(2*pi*R) */
+    float rpm10 = speed_ms * 600.0f / (2.0f * M_PI * CHASSIS_WHEEL_RADIUS);
+    int16_t cmd = (int16_t)rpm10;
+    /* Clamp to max (Emm_V5.0 max ~3000 = 300 RPM) */
+    if (cmd > 3000) cmd = 3000;
+    if (cmd < -3000) cmd = -3000;
+    return cmd;
+}
+
+/* ========== Set chassis velocity using Mecanum kinematics ========== */
+void chassis_set_velocity(float vx, float vy, float wz)
+{
+    float L = CHASSIS_WHEEL_TRACK;
+    float B = CHASSIS_WHEEL_BASE;
+
+    /* Mecanum inverse kinematics */
+    float v_fl = vx - vy - (L + B) * wz;
+    float v_fr = vx + vy + (L + B) * wz;
+    float v_rl = vx + vy - (L + B) * wz;
+    float v_rr = vx - vy + (L + B) * wz;
+
+    /* Convert to motor commands and send */
+    int16_t s_fl = speed_to_cmd(v_fl);
+    int16_t s_fr = speed_to_cmd(v_fr);
+    int16_t s_rl = speed_to_cmd(v_rl);
+    int16_t s_rr = speed_to_cmd(v_rr);
+
+    /* Send commands to each motor (acceleration=10) */
+    emm_send_speed(&huart2, MOTOR_ADDR_FL, s_fl, 10);
+    emm_send_speed(&huart2, MOTOR_ADDR_FR, s_fr, 10);
+    emm_send_speed(&huart2, MOTOR_ADDR_RL, s_rl, 10);
+    emm_send_speed(&huart2, MOTOR_ADDR_RR, s_rr, 10);
+
+    chassis_velocity.vx = vx;
+    chassis_velocity.vy = vy;
+    chassis_velocity.wz = wz;
+}
+
+void chassis_stop(void)
+{
+    chassis_velocity.vx = 0;
+    chassis_velocity.vy = 0;
+    chassis_velocity.wz = 0;
+    emm_stop(&huart2, 0x00, true);  /* Broadcast stop, lock rotor */
+}
+
+void chassis_stop_all(void)
+{
+    emm_stop(&huart2, MOTOR_ADDR_FL, false);
+    emm_stop(&huart2, MOTOR_ADDR_FR, false);
+    emm_stop(&huart2, MOTOR_ADDR_RL, false);
+    emm_stop(&huart2, MOTOR_ADDR_RR, false);
+}
+
+void chassis_init(void)
+{
+    chassis_stop();
+}
