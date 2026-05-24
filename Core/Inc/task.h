@@ -12,6 +12,7 @@
 /* ========== 任务状态机 ========== */
 typedef enum {
     TASK_INIT,
+    TASK_NAV_QR,            /* 导航到二维码板搜索区域 */
     TASK_WAIT_QR,
 
     /* 第一批: 原料区取料→放托盘→运到粗加工区→放粗加工→搬到暂存区 */
@@ -38,6 +39,7 @@ typedef enum {
     TASK_B2_PLACE_R1,
     TASK_B2_PLACE_R2,
     TASK_B2_PLACE_R3,
+    TASK_B2_RETURN_RAW,     /* 第二批放完粗加工后返回原料区 */
     TASK_B2_MOVE_1,
     TASK_B2_MOVE_2,
     TASK_B2_MOVE_3,
@@ -60,10 +62,15 @@ typedef enum {
 #endif
 #define START_ANGLE         M_PI    /* 朝x负方向 */
 
-/* 原料区 (旋转转盘中心) */
-#define RAW_MATERIAL_X      1.200f
-#define RAW_MATERIAL_Y      2.400f
-#define RAW_MATERIAL_FACE   0.0f    /* TODO: 到达原料区后面向转盘的角度 (rad), 需实测 */
+/* 二维码板搜索区域中心 (待公布后填入) */
+#define QR_SEARCH_X         0.400f  /* TODO: 填入二维码板搜索区域中心 X */
+#define QR_SEARCH_Y         1.200f  /* TODO: 填入二维码板搜索区域中心 Y */
+#define QR_SEARCH_ANGLE     M_PI    /* TODO: 面向二维码板的角度 (rad) */
+
+/* 原料区搜索区域中心 (待公布后填入) */
+#define RAW_MATERIAL_X      1.200f  /* TODO: 填入原料区搜索区域中心 X */
+#define RAW_MATERIAL_Y      2.400f  /* TODO: 填入原料区搜索区域中心 Y */
+#define RAW_MATERIAL_FACE   0.0f    /* TODO: 面向原料区的角度 (rad) */
 
 /* 粗加工区 (3个圆环位置, 按任务码编号1-3) */
 #define ROUGH_1_X           1.050f
@@ -98,6 +105,7 @@ typedef enum {
 typedef struct {
     uint8_t pick_attempts;      /* 总取料尝试次数 */
     uint8_t pick_successes;     /* 成功取料次数 */
+    uint8_t place_successes;    /* 成功放置次数 */
     uint8_t vision_timeouts;    /* 视觉超时次数 */
 } task_stats_t;
 

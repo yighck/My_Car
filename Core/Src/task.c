@@ -1,4 +1,5 @@
 #include "task.h"
+#include <stdio.h>
 
 #define NAV_ALIGN_TIMEOUT_MS   3000U
 #define VISION_WAIT_TIMEOUT_MS 10000U
@@ -183,37 +184,64 @@ static bool do_place_stack(void)
 
 static bool do_tray_drop(uint8_t slot)
 {
+    /* 完整流程: 夹爪张开→下降→抓取→上升→旋转至托盘→下降→释放→上升→回位+转盘旋转 */
     switch (motion_step) {
-    case 0:
-        prepare_tray_slot(slot);
+    case 0:     /* 夹爪张开 */
+        gripper_open();
         set_motion_step(1);
         break;
-    case 1:
+    case 1:     /* 下降 */
         if (motion_done(300)) {
             lift_move_down();
             set_motion_step(2);
         }
         break;
-    case 2:
+    case 2:     /* 夹爪抓取 */
         if (motion_done(1000)) {
-            gripper_open();
+            gripper_close();
             set_motion_step(3);
         }
         break;
-    case 3:
+    case 3:     /* 上升 */
         if (motion_done(500)) {
             lift_move_up();
             set_motion_step(4);
         }
         break;
-    case 4:
+    case 4:     /* 旋转夹爪至托盘上方 */
         if (motion_done(1000)) {
             lift_stop();
-            gripper_rotate_center();
+            gripper_rotate_to_tray();
             set_motion_step(5);
         }
         break;
-    case 5:
+    case 5:     /* 下降至托盘 */
+        if (motion_done(300)) {
+            lift_move_down();
+            set_motion_step(6);
+        }
+        break;
+    case 6:     /* 夹爪释放 */
+        if (motion_done(1000)) {
+            gripper_open();
+            set_motion_step(7);
+        }
+        break;
+    case 7:     /* 上升 */
+        if (motion_done(500)) {
+            lift_move_up();
+            set_motion_step(8);
+        }
+        break;
+    case 8:     /* 夹爪回位 + 托盘旋转120° */
+        if (motion_done(1000)) {
+            lift_stop();
+            gripper_rotate_center();
+            tray_rotate_to_slot(slot);
+            set_motion_step(9);
+        }
+        break;
+    case 9:     /* 等待旋转完成 */
         if (motion_done(300)) {
             return true;
         }
@@ -311,11 +339,22 @@ void task_update(void)
         tray_rotate_to_slot(0);
         gripper_rotate_center();
         lift_stop();
-        enter_state(TASK_WAIT_QR);
+        enter_state(TASK_NAV_QR);
+        break;
+
+    case TASK_NAV_QR:
+        /* 一键启动 → 先导航到二维码板搜索区域 → 等待扫描 */
+        if (action_step == 0) {
+            nav_goto_heading(QR_SEARCH_X, QR_SEARCH_Y, QR_SEARCH_ANGLE);
+            set_action_step(1);
+        }
+        if (nav_get_state() == NAV_REACHED) {
+            enter_state(TASK_WAIT_QR);
+        }
         break;
 
     case TASK_WAIT_QR:
-        /* OPS9定位有效 + QR码已扫描 → 开始任务 */
+        /* 已到达二维码板附近, 等待OPS9定位有效 + QR码扫描完成 */
         if (positioning_is_valid() && qr_code_available()) {
             enter_state(TASK_B1_PICK_1);
         }
@@ -365,27 +404,15 @@ void task_update(void)
             }
             break;
         case 4:
-            if (do_pick()) {
+            if (do_tray_drop(idx)) {
                 task_stats.pick_successes++;
-                task_state_t next[] = {TASK_B1_TRAY_1, TASK_B1_TRAY_2, TASK_B1_TRAY_3};
+                task_state_t next[] = {TASK_B1_PICK_2, TASK_B1_PICK_3, TASK_B1_PLACE_R1};
                 enter_state(next[idx]);
             }
             break;
         default:
             set_action_step(0);
             break;
-        }
-        break;
-    }
-
-    case TASK_B1_TRAY_1:
-    case TASK_B1_TRAY_2:
-    case TASK_B1_TRAY_3:
-    {
-        uint8_t idx = state_index3(task_state, TASK_B1_TRAY_1, TASK_B1_TRAY_2, TASK_B1_TRAY_3);
-        if (do_tray_drop(idx)) {
-            task_state_t next[] = {TASK_B1_PICK_2, TASK_B1_PICK_3, TASK_B1_PLACE_R1};
-            enter_state(next[idx]);
         }
         break;
     }
@@ -434,6 +461,7 @@ void task_update(void)
             break;
         case 5:
             if (do_place()) {
+                task_stats.place_successes++;
                 task_state_t next[] = {TASK_B1_PLACE_R2, TASK_B1_PLACE_R3, TASK_B1_MOVE_1};
                 enter_state(next[idx]);
             }
@@ -450,11 +478,9 @@ void task_update(void)
     case TASK_B1_MOVE_3:
     {
         uint8_t idx = state_index3(task_state, TASK_B1_MOVE_1, TASK_B1_MOVE_2, TASK_B1_MOVE_3);
-        uint8_t rough_pos = qr_task.batch1_positions[idx];
-        uint8_t temp_pos = qr_task.batch1_positions[idx];
         float rx, ry, tx, ty;
-        get_rough_pos(rough_pos, &rx, &ry);
-        get_temp_pos(temp_pos, &tx, &ty);
+        get_rough_pos(qr_task.batch1_positions[idx], &rx, &ry);
+        get_temp_pos(qr_task.batch1_positions[idx], &tx, &ty);
 
         switch (action_step) {
         case 0:
@@ -523,6 +549,7 @@ void task_update(void)
             break;
         case 11:
             if (do_place()) {
+                task_stats.place_successes++;
                 task_state_t next[] = {TASK_B1_MOVE_2, TASK_B1_MOVE_3, TASK_B2_PICK_1};
                 enter_state(next[idx]);
             }
@@ -578,27 +605,15 @@ void task_update(void)
             }
             break;
         case 4:
-            if (do_pick()) {
+            if (do_tray_drop(idx)) {
                 task_stats.pick_successes++;
-                task_state_t next[] = {TASK_B2_TRAY_1, TASK_B2_TRAY_2, TASK_B2_TRAY_3};
+                task_state_t next[] = {TASK_B2_PICK_2, TASK_B2_PICK_3, TASK_B2_PLACE_R1};
                 enter_state(next[idx]);
             }
             break;
         default:
             set_action_step(0);
             break;
-        }
-        break;
-    }
-
-    case TASK_B2_TRAY_1:
-    case TASK_B2_TRAY_2:
-    case TASK_B2_TRAY_3:
-    {
-        uint8_t idx = state_index3(task_state, TASK_B2_TRAY_1, TASK_B2_TRAY_2, TASK_B2_TRAY_3);
-        if (do_tray_drop(idx)) {
-            task_state_t next[] = {TASK_B2_PICK_2, TASK_B2_PICK_3, TASK_B2_PLACE_R1};
-            enter_state(next[idx]);
         }
         break;
     }
@@ -646,7 +661,8 @@ void task_update(void)
             break;
         case 5:
             if (do_place()) {
-                task_state_t next[] = {TASK_B2_PLACE_R2, TASK_B2_PLACE_R3, TASK_B2_MOVE_1};
+                task_stats.place_successes++;
+                task_state_t next[] = {TASK_B2_PLACE_R2, TASK_B2_PLACE_R3, TASK_B2_RETURN_RAW};
                 enter_state(next[idx]);
             }
             break;
@@ -657,16 +673,25 @@ void task_update(void)
         break;
     }
 
+    case TASK_B2_RETURN_RAW:
+        /* 第二批粗加工区放完 → 返回原料区, 准备搬运到暂存区 */
+        if (action_step == 0) {
+            nav_goto_heading(RAW_MATERIAL_X, RAW_MATERIAL_Y, RAW_MATERIAL_FACE);
+            set_action_step(1);
+        }
+        if (nav_get_state() == NAV_REACHED) {
+            enter_state(TASK_B2_MOVE_1);
+        }
+        break;
+
     case TASK_B2_MOVE_1:
     case TASK_B2_MOVE_2:
     case TASK_B2_MOVE_3:
     {
         uint8_t idx = state_index3(task_state, TASK_B2_MOVE_1, TASK_B2_MOVE_2, TASK_B2_MOVE_3);
-        uint8_t rough_pos = qr_task.batch2_positions[idx];
-        uint8_t temp_pos = qr_task.batch2_positions[idx];
         float rx, ry, tx, ty;
-        get_rough_pos(rough_pos, &rx, &ry);
-        get_temp_pos(temp_pos, &tx, &ty);
+        get_rough_pos(qr_task.batch2_positions[idx], &rx, &ry);
+        get_temp_pos(qr_task.batch1_positions[idx], &tx, &ty);  /* 暂存区位置同第一批, 保证堆叠颜色一致 */
 
         switch (action_step) {
         case 0:
@@ -735,6 +760,7 @@ void task_update(void)
             break;
         case 11:
             if (do_place_stack()) {
+                task_stats.place_successes++;
                 task_state_t next[] = {TASK_B2_MOVE_2, TASK_B2_MOVE_3, TASK_RETURN_HOME};
                 enter_state(next[idx]);
             }
@@ -758,6 +784,21 @@ void task_update(void)
 
     case TASK_DONE:
         chassis_stop();
+        {
+            /* 一次性发送统计信息到串口屏 */
+            static bool stats_sent = false;
+            if (!stats_sent) {
+                char buf[80];
+                int len = snprintf(buf, sizeof(buf),
+                    "PICK:%d/%d PLACE:%d VT:%d\r\n",
+                    task_stats.pick_successes,
+                    task_stats.pick_attempts,
+                    task_stats.place_successes,
+                    task_stats.vision_timeouts);
+                HAL_UART_Transmit(&huart4, (uint8_t *)buf, len, 100);
+                stats_sent = true;
+            }
+        }
         break;
 
     default:
