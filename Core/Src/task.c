@@ -2,6 +2,21 @@
 
 #define NAV_ALIGN_TIMEOUT_MS   3000U
 #define VISION_WAIT_TIMEOUT_MS 10000U
+#define VISION_MAX_RETRIES     5U      /* 视觉识别最大重试次数 */
+
+task_state_t task_state = TASK_INIT;
+
+static uint32_t state_enter_tick = 0;
+static uint8_t  action_step = 0;
+static uint32_t step_tick = 0;
+
+static uint8_t  motion_step = 0;
+static uint32_t motion_tick = 0;
+
+static uint8_t  vision_retry_cnt = 0;  /* 视觉重试计数 */
+
+/* 抓取统计 */
+task_stats_t task_stats = {0};
 
 task_state_t task_state = TASK_INIT;
 
@@ -89,20 +104,10 @@ static void set_motion_step(uint8_t new_step)
     motion_tick = HAL_GetTick();
 }
 
-static void gripper_rotate_tray_slot(uint8_t slot)
+static void prepare_tray_slot(uint8_t slot)
 {
-    switch (slot) {
-    case 0:
-        gripper_rotate_left();
-        break;
-    case 1:
-        gripper_rotate_center();
-        break;
-    case 2:
-    default:
-        gripper_rotate_right();
-        break;
-    }
+    gripper_rotate_to_tray();
+    tray_rotate_to_slot(slot);
 }
 
 static bool do_pick(void)
@@ -189,7 +194,7 @@ static bool do_tray_drop(uint8_t slot)
 {
     switch (motion_step) {
     case 0:
-        gripper_rotate_tray_slot(slot);
+        prepare_tray_slot(slot);
         set_motion_step(1);
         break;
     case 1:
@@ -234,7 +239,7 @@ static bool do_tray_pick(uint8_t slot)
 {
     switch (motion_step) {
     case 0:
-        gripper_rotate_tray_slot(slot);
+        prepare_tray_slot(slot);
         gripper_open();
         set_motion_step(1);
         break;
@@ -278,9 +283,12 @@ static bool do_tray_pick(uint8_t slot)
 
 static void nav_goto_vision_offset(void)
 {
-    nav_goto_heading(pos_current.x + vision_current.offset_x,
-                     pos_current.y + vision_current.offset_y,
-                     0);
+    /* 视觉偏移是相机坐标系, 需旋转到全局坐标系 */
+    float cos_a = cosf(pos_current.angle);
+    float sin_a = sinf(pos_current.angle);
+    float dx = cos_a * vision_current.offset_x - sin_a * vision_current.offset_y;
+    float dy = sin_a * vision_current.offset_x + cos_a * vision_current.offset_y;
+    nav_goto_heading(pos_current.x + dx, pos_current.y + dy, pos_current.angle);
 }
 
 static bool wait_reached_or_timeout(void)
@@ -303,7 +311,7 @@ void task_update(void)
     switch (task_state) {
     case TASK_INIT:
         gripper_open();
-        tray_close();
+        tray_rotate_to_slot(0);
         gripper_rotate_center();
         lift_stop();
         enter_state(TASK_WAIT_QR);
@@ -325,7 +333,9 @@ void task_update(void)
 
         switch (action_step) {
         case 0:
-            nav_goto_heading(RAW_MATERIAL_X, RAW_MATERIAL_Y, 0);
+            nav_goto_heading(RAW_MATERIAL_X, RAW_MATERIAL_Y, RAW_MATERIAL_FACE);
+            vision_retry_cnt = 0;
+            task_stats.pick_attempts++;
             set_action_step(1);
             break;
         case 1:
@@ -343,8 +353,14 @@ void task_update(void)
                     vision_request_recognize();
                 }
             } else if (step_done(VISION_WAIT_TIMEOUT_MS)) {
-                vision_request_recognize();
-                step_tick = HAL_GetTick();
+                vision_retry_cnt++;
+                if (vision_retry_cnt >= VISION_MAX_RETRIES) {
+                    task_stats.vision_timeouts++;
+                    set_action_step(4);
+                } else {
+                    vision_request_recognize();
+                    step_tick = HAL_GetTick();
+                }
             }
             break;
         case 3:
@@ -354,6 +370,7 @@ void task_update(void)
             break;
         case 4:
             if (do_pick()) {
+                task_stats.pick_successes++;
                 task_state_t next[] = {TASK_B1_TRAY_1, TASK_B1_TRAY_2, TASK_B1_TRAY_3};
                 enter_state(next[idx]);
             }
@@ -393,7 +410,7 @@ void task_update(void)
             }
             break;
         case 1:
-            nav_goto_heading(px, py, 0);
+            nav_goto_heading(px, py, ROUGH_FACE);
             set_action_step(2);
             break;
         case 2:
@@ -441,7 +458,7 @@ void task_update(void)
 
         switch (action_step) {
         case 0:
-            nav_goto_heading(rx, ry, 0);
+            nav_goto_heading(rx, ry, ROUGH_FACE);
             set_action_step(1);
             break;
         case 1:
@@ -474,7 +491,7 @@ void task_update(void)
             }
             break;
         case 6:
-            nav_goto_heading(tx, ty, 0);
+            nav_goto_heading(tx, ty, TEMP_FACE);
             set_action_step(7);
             break;
         case 7:
@@ -523,7 +540,9 @@ void task_update(void)
 
         switch (action_step) {
         case 0:
-            nav_goto_heading(RAW_MATERIAL_X, RAW_MATERIAL_Y, 0);
+            nav_goto_heading(RAW_MATERIAL_X, RAW_MATERIAL_Y, RAW_MATERIAL_FACE);
+            vision_retry_cnt = 0;
+            task_stats.pick_attempts++;
             set_action_step(1);
             break;
         case 1:
@@ -541,8 +560,14 @@ void task_update(void)
                     vision_request_recognize();
                 }
             } else if (step_done(VISION_WAIT_TIMEOUT_MS)) {
-                vision_request_recognize();
-                step_tick = HAL_GetTick();
+                vision_retry_cnt++;
+                if (vision_retry_cnt >= VISION_MAX_RETRIES) {
+                    task_stats.vision_timeouts++;
+                    set_action_step(4);
+                } else {
+                    vision_request_recognize();
+                    step_tick = HAL_GetTick();
+                }
             }
             break;
         case 3:
@@ -552,6 +577,7 @@ void task_update(void)
             break;
         case 4:
             if (do_pick()) {
+                task_stats.pick_successes++;
                 task_state_t next[] = {TASK_B2_TRAY_1, TASK_B2_TRAY_2, TASK_B2_TRAY_3};
                 enter_state(next[idx]);
             }
@@ -591,7 +617,7 @@ void task_update(void)
             }
             break;
         case 1:
-            nav_goto_heading(px, py, 0);
+            nav_goto_heading(px, py, ROUGH_FACE);
             set_action_step(2);
             break;
         case 2:
@@ -639,7 +665,7 @@ void task_update(void)
 
         switch (action_step) {
         case 0:
-            nav_goto_heading(rx, ry, 0);
+            nav_goto_heading(rx, ry, ROUGH_FACE);
             set_action_step(1);
             break;
         case 1:
@@ -672,7 +698,7 @@ void task_update(void)
             }
             break;
         case 6:
-            nav_goto_heading(tx, ty, 0);
+            nav_goto_heading(tx, ty, TEMP_FACE);
             set_action_step(7);
             break;
         case 7:

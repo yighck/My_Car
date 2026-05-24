@@ -30,10 +30,11 @@ extern UART_HandleTypeDef huart6;
 #define SERVO_MIN_PULSE       500   /* 0.5ms = 0 degree   */
 #define SERVO_MAX_PULSE       2500  /* 2.5ms = 180 degree */
 #define SERVO_CENTER_PULSE    1500  /* 1.5ms = 90 degree  */
+#define SERVO_MAX_ANGLE       270   /* 支持270°舵机 */
 
 /* ========== Servo Angle Macros ========== */
 #define ANGLE_TO_PULSE(angle) \
-    (SERVO_MIN_PULSE + (uint16_t)((angle) * (SERVO_MAX_PULSE - SERVO_MIN_PULSE) / 180.0f))
+    (SERVO_MIN_PULSE + (uint16_t)((angle) * (SERVO_MAX_PULSE - SERVO_MIN_PULSE) / (float)SERVO_MAX_ANGLE))
 
 /* ========== UART Ring Buffer Size ========== */
 #define UART_RX_BUF_SIZE  256

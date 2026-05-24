@@ -63,6 +63,7 @@ typedef enum {
 /* 原料区 (旋转转盘中心) */
 #define RAW_MATERIAL_X      1.200f
 #define RAW_MATERIAL_Y      2.400f
+#define RAW_MATERIAL_FACE   0.0f    /* TODO: 到达原料区后面向转盘的角度 (rad), 需实测 */
 
 /* 粗加工区 (3个圆环位置, 按任务码编号1-3) */
 #define ROUGH_1_X           1.050f
@@ -71,6 +72,7 @@ typedef enum {
 #define ROUGH_2_Y           0.075f
 #define ROUGH_3_X           1.350f
 #define ROUGH_3_Y           0.075f
+#define ROUGH_FACE          0.0f    /* TODO: 粗加工区放置朝向 (rad), 需实测 */
 
 /* 暂存区 (3个圆环位置, 按任务码编号1-3) */
 #define TEMP_1_X            0.075f
@@ -79,6 +81,7 @@ typedef enum {
 #define TEMP_2_Y            1.200f
 #define TEMP_3_X            0.075f
 #define TEMP_3_Y            1.050f
+#define TEMP_FACE           0.0f    /* TODO: 暂存区放置朝向 (rad), 需实测 */
 
 /* 码垛: 第二批暂存区下降补偿 (秒) */
 #define STACK_EXTRA_MS      500
@@ -90,6 +93,15 @@ typedef enum {
 #define COLOR_GREEN         4
 #define COLOR_BLACK         5
 #define COLOR_LIGHT_BLUE    6
+
+/* ========== 任务统计 ========== */
+typedef struct {
+    uint8_t pick_attempts;      /* 总取料尝试次数 */
+    uint8_t pick_successes;     /* 成功取料次数 */
+    uint8_t vision_timeouts;    /* 视觉超时次数 */
+} task_stats_t;
+
+extern task_stats_t task_stats;
 
 /* ========== 函数声明 ========== */
 void task_init(void);

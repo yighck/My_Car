@@ -4,18 +4,20 @@
 #include "common.h"
 
 /* ========== Servo Angle Defines (degrees) ========== */
-/* Material tray servo (TIM3_CH4 - PB1) */
-#define TRAY_ANGLE_OPEN       90
-#define TRAY_ANGLE_CLOSE      0
+/* TODO: 以下角度均为初始值, 需根据实际舵机安装位置实测校准 */
+
+/* Material tray servo (TIM3_CH4 - PB1) - 旋转托盘, 3个槽位各120° */
+#define TRAY_SLOT_0           0     /* TODO: 槽位0角度, 需实测 */
+#define TRAY_SLOT_1           120   /* TODO: 槽位1角度 (槽位0 + 120°) */
+#define TRAY_SLOT_2           240   /* TODO: 槽位2角度 (槽位0 + 240°) */
 
 /* Gripper rotate servo (TIM3_CH3 - PC8) */
-#define GRIPPER_ROTATE_CENTER  90
-#define GRIPPER_ROTATE_LEFT    0
-#define GRIPPER_ROTATE_RIGHT   180
+#define GRIPPER_ROTATE_CENTER  90   /* TODO: 夹爪朝前(取料/放料) */
+#define GRIPPER_ROTATE_TRAY   90   /* TODO: 夹爪朝向托盘的固定角度, 需实测 */
 
 /* Gripper open/close servo (TIM8_CH4 - PC9) */
-#define GRIPPER_ANGLE_OPEN    60
-#define GRIPPER_ANGLE_CLOSE   0
+#define GRIPPER_ANGLE_OPEN    60    /* TODO: 张开角度, 需实测确保能夹住物料 */
+#define GRIPPER_ANGLE_CLOSE   0     /* TODO: 闭合角度, 需实测 */
 
 /* ========== 升降步进电机 (USART2总线, Emm_V5.0) ========== */
 #define LIFT_MOTOR_ADDR       0x05   /* Lift motor address */
@@ -34,12 +36,10 @@ void gripper_set_angle(float angle);
 void gripper_open(void);
 void gripper_close(void);
 void gripper_rotate_center(void);
-void gripper_rotate_left(void);
-void gripper_rotate_right(void);
+void gripper_rotate_to_tray(void);  /* 夹爪转向托盘 */
 
 /* ========== Tray Convenience ========== */
-void tray_open(void);
-void tray_close(void);
+void tray_rotate_to_slot(uint8_t slot);  /* 旋转托盘到指定槽位 (0/1/2) */
 
 /* ========== 升降步进电机 (Emm_V5.0, USART2总线) ========== */
 void lift_move_up(void);

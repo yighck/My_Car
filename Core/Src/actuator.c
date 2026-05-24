@@ -12,7 +12,7 @@ void actuator_init(void)
 
     /* Set default positions */
     gripper_rotate_set_angle(GRIPPER_ROTATE_CENTER);
-    tray_set_angle(TRAY_ANGLE_CLOSE);
+    tray_set_angle(TRAY_SLOT_0);
     gripper_set_angle(GRIPPER_ANGLE_OPEN);
 }
 
@@ -20,7 +20,7 @@ void actuator_init(void)
 void servo_set_angle(TIM_HandleTypeDef *htim, uint32_t channel, float angle)
 {
     if (angle < 0.0f) angle = 0.0f;
-    if (angle > 180.0f) angle = 180.0f;
+    if (angle > (float)SERVO_MAX_ANGLE) angle = (float)SERVO_MAX_ANGLE;
     __HAL_TIM_SET_COMPARE(htim, channel, ANGLE_TO_PULSE(angle));
 }
 
@@ -31,10 +31,14 @@ void gripper_set_angle(float angle)        { servo_set_angle(&htim8, TIM_CHANNEL
 void gripper_open(void)          { gripper_set_angle(GRIPPER_ANGLE_OPEN); }
 void gripper_close(void)         { gripper_set_angle(GRIPPER_ANGLE_CLOSE); }
 void gripper_rotate_center(void) { gripper_rotate_set_angle(GRIPPER_ROTATE_CENTER); }
-void gripper_rotate_left(void)   { gripper_rotate_set_angle(GRIPPER_ROTATE_LEFT); }
-void gripper_rotate_right(void)  { gripper_rotate_set_angle(GRIPPER_ROTATE_RIGHT); }
-void tray_open(void)             { tray_set_angle(TRAY_ANGLE_OPEN); }
-void tray_close(void)            { tray_set_angle(TRAY_ANGLE_CLOSE); }
+void gripper_rotate_to_tray(void) { gripper_rotate_set_angle(GRIPPER_ROTATE_TRAY); }
+
+void tray_rotate_to_slot(uint8_t slot)
+{
+    static const float tray_angles[] = {TRAY_SLOT_0, TRAY_SLOT_1, TRAY_SLOT_2};
+    if (slot > 2) slot = 2;
+    tray_set_angle(tray_angles[slot]);
+}
 
 /* ========== 升降步进电机 (Emm_V5.0, USART2总线) ========== */
 void lift_set_speed(int16_t speed_rpm)
