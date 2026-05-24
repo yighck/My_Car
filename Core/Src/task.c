@@ -1,29 +1,67 @@
 #include "task.h"
 
-task_state_t task_state = TASK_P1_SCAN_BARCODE;
+#define NAV_ALIGN_TIMEOUT_MS   3000U
+#define VISION_WAIT_TIMEOUT_MS 10000U
 
-static uint8_t material_shelf[MAX_MATERIALS] = {0};
-static uint8_t current_material = 0;
-static uint8_t current_pick_shelf = 0;
+task_state_t task_state = TASK_INIT;
+
 static uint32_t state_enter_tick = 0;
 static uint8_t  action_step = 0;
 static uint32_t step_tick = 0;
 
-/* ========== Position helpers ========== */
-static void get_warehouse_pos(uint8_t idx, float *x, float *y)
+static uint8_t  motion_step = 0;
+static uint32_t motion_tick = 0;
+
+static void get_rough_pos(uint8_t pos_num, float *x, float *y)
 {
-    static const float wx[] = {WAREHOUSE_1_X, WAREHOUSE_2_X, WAREHOUSE_3_X, WAREHOUSE_4_X};
-    static const float wy[] = {WAREHOUSE_1_Y, WAREHOUSE_2_Y, WAREHOUSE_3_Y, WAREHOUSE_4_Y};
-    if (idx < MAX_MATERIALS) { *x = wx[idx]; *y = wy[idx]; }
-    else { *x = START_X; *y = START_Y; }
+    static const float rx[] = {0, ROUGH_1_X, ROUGH_2_X, ROUGH_3_X};
+    static const float ry[] = {0, ROUGH_1_Y, ROUGH_2_Y, ROUGH_3_Y};
+
+    if (pos_num >= 1 && pos_num <= 3) {
+        *x = rx[pos_num];
+        *y = ry[pos_num];
+    } else {
+        *x = START_X;
+        *y = START_Y;
+    }
 }
 
-static void get_shelf_pos(uint8_t shelf_num, float *x, float *y)
+static void get_temp_pos(uint8_t pos_num, float *x, float *y)
 {
-    static const float sx[] = {0, SHELF_1_X, SHELF_2_X, SHELF_3_X, SHELF_4_X, SHELF_5_X, SHELF_6_X, SHELF_7_X};
-    static const float sy[] = {0, SHELF_1_Y, SHELF_2_Y, SHELF_3_Y, SHELF_4_Y, SHELF_5_Y, SHELF_6_Y, SHELF_7_Y};
-    if (shelf_num >= 1 && shelf_num <= 7) { *x = sx[shelf_num]; *y = sy[shelf_num]; }
-    else { *x = START_X; *y = START_Y; }
+    static const float tx[] = {0, TEMP_1_X, TEMP_2_X, TEMP_3_X};
+    static const float ty[] = {0, TEMP_1_Y, TEMP_2_Y, TEMP_3_Y};
+
+    if (pos_num >= 1 && pos_num <= 3) {
+        *x = tx[pos_num];
+        *y = ty[pos_num];
+    } else {
+        *x = START_X;
+        *y = START_Y;
+    }
+}
+
+static uint8_t state_index3(task_state_t state,
+                            task_state_t s0,
+                            task_state_t s1,
+                            task_state_t s2)
+{
+    if (state == s0) return 0;
+    if (state == s1) return 1;
+    if (state == s2) return 2;
+    return 0;
+}
+
+static void reset_motion(void)
+{
+    motion_step = 0;
+    motion_tick = HAL_GetTick();
+}
+
+static void set_action_step(uint8_t new_step)
+{
+    action_step = new_step;
+    step_tick = HAL_GetTick();
+    reset_motion();
 }
 
 static void enter_state(task_state_t new_state)
@@ -31,43 +69,228 @@ static void enter_state(task_state_t new_state)
     task_state = new_state;
     state_enter_tick = HAL_GetTick();
     action_step = 0;
-    step_tick = HAL_GetTick();
+    step_tick = state_enter_tick;
+    reset_motion();
 }
 
-static bool step_done(uint32_t ms) { return (HAL_GetTick() - step_tick) >= ms; }
+static bool step_done(uint32_t ms)
+{
+    return (HAL_GetTick() - step_tick) >= ms;
+}
 
-/* ========== Pick: lower -> grip -> raise. Returns true when done ========== */
+static bool motion_done(uint32_t ms)
+{
+    return (HAL_GetTick() - motion_tick) >= ms;
+}
+
+static void set_motion_step(uint8_t new_step)
+{
+    motion_step = new_step;
+    motion_tick = HAL_GetTick();
+}
+
+static void gripper_rotate_tray_slot(uint8_t slot)
+{
+    switch (slot) {
+    case 0:
+        gripper_rotate_left();
+        break;
+    case 1:
+        gripper_rotate_center();
+        break;
+    case 2:
+    default:
+        gripper_rotate_right();
+        break;
+    }
+}
+
 static bool do_pick(void)
 {
-    switch (action_step) {
-    case 0: lift_move_down(); action_step = 1; step_tick = HAL_GetTick(); break;
-    case 1: if (step_done(1000)) { gripper_close(); action_step = 2; step_tick = HAL_GetTick(); } break;
-    case 2: if (step_done(500))  { lift_move_up();  action_step = 3; step_tick = HAL_GetTick(); } break;
-    case 3: if (step_done(1000)) { lift_stop();     action_step = 4; } break;
-    case 4: return true;
+    switch (motion_step) {
+    case 0:
+        lift_move_down();
+        set_motion_step(1);
+        break;
+    case 1:
+        if (motion_done(1000)) {
+            gripper_close();
+            set_motion_step(2);
+        }
+        break;
+    case 2:
+        if (motion_done(500)) {
+            lift_move_up();
+            set_motion_step(3);
+        }
+        break;
+    case 3:
+        if (motion_done(1000)) {
+            lift_stop();
+            set_motion_step(4);
+        }
+        break;
+    case 4:
+        return true;
+    default:
+        reset_motion();
+        break;
     }
+
     return false;
 }
 
-/* ========== Place: lower -> release -> raise. Returns true when done ========== */
+static bool do_place_with_down_time(uint32_t down_ms)
+{
+    switch (motion_step) {
+    case 0:
+        lift_move_down();
+        set_motion_step(1);
+        break;
+    case 1:
+        if (motion_done(down_ms)) {
+            gripper_open();
+            set_motion_step(2);
+        }
+        break;
+    case 2:
+        if (motion_done(500)) {
+            lift_move_up();
+            set_motion_step(3);
+        }
+        break;
+    case 3:
+        if (motion_done(1000)) {
+            lift_stop();
+            set_motion_step(4);
+        }
+        break;
+    case 4:
+        return true;
+    default:
+        reset_motion();
+        break;
+    }
+
+    return false;
+}
+
 static bool do_place(void)
 {
-    switch (action_step) {
-    case 0: lift_move_down(); action_step = 1; step_tick = HAL_GetTick(); break;
-    case 1: if (step_done(1000)) { gripper_open();  action_step = 2; step_tick = HAL_GetTick(); } break;
-    case 2: if (step_done(500))  { lift_move_up();   action_step = 3; step_tick = HAL_GetTick(); } break;
-    case 3: if (step_done(1000)) { lift_stop();      action_step = 4; } break;
-    case 4: return true;
+    return do_place_with_down_time(1000);
+}
+
+static bool do_place_stack(void)
+{
+    return do_place_with_down_time(1000 + STACK_EXTRA_MS);
+}
+
+static bool do_tray_drop(uint8_t slot)
+{
+    switch (motion_step) {
+    case 0:
+        gripper_rotate_tray_slot(slot);
+        set_motion_step(1);
+        break;
+    case 1:
+        if (motion_done(300)) {
+            lift_move_down();
+            set_motion_step(2);
+        }
+        break;
+    case 2:
+        if (motion_done(1000)) {
+            gripper_open();
+            set_motion_step(3);
+        }
+        break;
+    case 3:
+        if (motion_done(500)) {
+            lift_move_up();
+            set_motion_step(4);
+        }
+        break;
+    case 4:
+        if (motion_done(1000)) {
+            lift_stop();
+            gripper_rotate_center();
+            set_motion_step(5);
+        }
+        break;
+    case 5:
+        if (motion_done(300)) {
+            return true;
+        }
+        break;
+    default:
+        reset_motion();
+        break;
     }
+
     return false;
+}
+
+static bool do_tray_pick(uint8_t slot)
+{
+    switch (motion_step) {
+    case 0:
+        gripper_rotate_tray_slot(slot);
+        gripper_open();
+        set_motion_step(1);
+        break;
+    case 1:
+        if (motion_done(300)) {
+            lift_move_down();
+            set_motion_step(2);
+        }
+        break;
+    case 2:
+        if (motion_done(1000)) {
+            gripper_close();
+            set_motion_step(3);
+        }
+        break;
+    case 3:
+        if (motion_done(500)) {
+            lift_move_up();
+            set_motion_step(4);
+        }
+        break;
+    case 4:
+        if (motion_done(1000)) {
+            lift_stop();
+            gripper_rotate_center();
+            set_motion_step(5);
+        }
+        break;
+    case 5:
+        if (motion_done(300)) {
+            return true;
+        }
+        break;
+    default:
+        reset_motion();
+        break;
+    }
+
+    return false;
+}
+
+static void nav_goto_vision_offset(void)
+{
+    nav_goto_heading(pos_current.x + vision_current.offset_x,
+                     pos_current.y + vision_current.offset_y,
+                     0);
+}
+
+static bool wait_reached_or_timeout(void)
+{
+    return nav_get_state() == NAV_REACHED || step_done(NAV_ALIGN_TIMEOUT_MS);
 }
 
 void task_init(void)
 {
-    current_material = 0;
-    current_pick_shelf = 0;
-    memset(material_shelf, 0, sizeof(material_shelf));
-    enter_state(TASK_P1_SCAN_BARCODE);
+    enter_state(TASK_INIT);
 }
 
 void task_update(void)
@@ -75,125 +298,436 @@ void task_update(void)
     nav_update();
     positioning_process();
     vision_process();
-
-    float tx, ty;
+    qr_code_process();
 
     switch (task_state) {
-
-    /* ========== PHASE 1: warehouse -> numbered shelf ========== */
-
-    case TASK_P1_SCAN_BARCODE:
-        vision_request_barcode();
-        enter_state(TASK_P1_GOTO_WAREHOUSE);
+    case TASK_INIT:
+        gripper_open();
+        tray_close();
+        gripper_rotate_center();
+        lift_stop();
+        enter_state(TASK_WAIT_QR);
         break;
 
-    case TASK_P1_GOTO_WAREHOUSE:
-        if (vision_data_available()) {
-            get_warehouse_pos(current_material, &tx, &ty);
-            nav_goto(tx, ty);
-            enter_state(TASK_P1_ALIGN_WAREHOUSE);
+    case TASK_WAIT_QR:
+        if (qr_code_available()) {
+            enter_state(TASK_B1_PICK_1);
         }
         break;
 
-    case TASK_P1_ALIGN_WAREHOUSE:
-        if (nav_get_state() == NAV_REACHED) {
-            vision_request_position();
-            enter_state(TASK_P1_PICK_MATERIAL);
-        }
-        break;
+    case TASK_B1_PICK_1:
+    case TASK_B1_PICK_2:
+    case TASK_B1_PICK_3:
+    {
+        uint8_t idx = state_index3(task_state, TASK_B1_PICK_1, TASK_B1_PICK_2, TASK_B1_PICK_3);
+        uint8_t color = qr_task.batch1_colors[idx];
 
-    case TASK_P1_PICK_MATERIAL:
-        if (vision_data_available() && vision_current.detected) {
-            nav_goto(pos_current.x + vision_current.offset_x,
-                     pos_current.y + vision_current.offset_y);
-        }
-        if (nav_get_state() == NAV_REACHED || (HAL_GetTick() - state_enter_tick > 3000)) {
-            enter_state(TASK_P1_GOTO_SHELF);
-        }
-        break;
-
-    case TASK_P1_GOTO_SHELF:
-        if (action_step < 4 && do_pick()) {
-            uint8_t sn = current_material + 1;
-            material_shelf[current_material] = sn;
-            get_shelf_pos(sn, &tx, &ty);
-            nav_goto(tx, ty);
-            enter_state(TASK_P1_PLACE_MATERIAL);
-        }
-        break;
-
-    case TASK_P1_PLACE_MATERIAL:
-        if (nav_get_state() == NAV_REACHED && action_step < 4) {
-            if (do_place()) {
-                current_material++;
-                if (current_material < MAX_MATERIALS) {
-                    enter_state(TASK_P1_SCAN_BARCODE);
-                } else {
-                    current_material = 0;
-                    current_pick_shelf = 4;
-                    enter_state(TASK_P2_GOTO_PICK_SHELF);
-                }
+        switch (action_step) {
+        case 0:
+            nav_goto_heading(RAW_MATERIAL_X, RAW_MATERIAL_Y, 0);
+            set_action_step(1);
+            break;
+        case 1:
+            if (nav_get_state() == NAV_REACHED) {
+                vision_request_recognize();
+                set_action_step(2);
             }
-        }
-        break;
-
-    /* ========== PHASE 2: material shelf -> next shelf ========== */
-
-    case TASK_P2_GOTO_PICK_SHELF:
-        if (current_pick_shelf < 2) {
-            enter_state(TASK_RETURN_HOME);
+            break;
+        case 2:
+            if (vision_data_available() && vision_current.detected) {
+                if (vision_current.barcode_id == color) {
+                    nav_goto_vision_offset();
+                    set_action_step(3);
+                } else {
+                    vision_request_recognize();
+                }
+            } else if (step_done(VISION_WAIT_TIMEOUT_MS)) {
+                vision_request_recognize();
+                step_tick = HAL_GetTick();
+            }
+            break;
+        case 3:
+            if (wait_reached_or_timeout()) {
+                set_action_step(4);
+            }
+            break;
+        case 4:
+            if (do_pick()) {
+                task_state_t next[] = {TASK_B1_TRAY_1, TASK_B1_TRAY_2, TASK_B1_TRAY_3};
+                enter_state(next[idx]);
+            }
+            break;
+        default:
+            set_action_step(0);
             break;
         }
-        get_shelf_pos(current_pick_shelf, &tx, &ty);
-        nav_goto(tx, ty);
-        enter_state(TASK_P2_ALIGN_PICK_SHELF);
         break;
+    }
 
-    case TASK_P2_ALIGN_PICK_SHELF:
-        if (nav_get_state() == NAV_REACHED) {
-            vision_request_position();
-            enter_state(TASK_P2_PICK_MATERIAL);
+    case TASK_B1_TRAY_1:
+    case TASK_B1_TRAY_2:
+    case TASK_B1_TRAY_3:
+    {
+        uint8_t idx = state_index3(task_state, TASK_B1_TRAY_1, TASK_B1_TRAY_2, TASK_B1_TRAY_3);
+        if (do_tray_drop(idx)) {
+            task_state_t next[] = {TASK_B1_PICK_2, TASK_B1_PICK_3, TASK_B1_PLACE_R1};
+            enter_state(next[idx]);
         }
         break;
+    }
 
-    case TASK_P2_PICK_MATERIAL:
-        if (vision_data_available() && vision_current.detected) {
-            nav_goto(pos_current.x + vision_current.offset_x,
-                     pos_current.y + vision_current.offset_y);
-        }
-        if ((nav_get_state() == NAV_REACHED || (HAL_GetTick() - state_enter_tick > 3000))
-            && action_step < 4) {
-            if (do_pick()) {
-                /* Pick done, navigate to place shelf */
-                uint8_t ps = 5 + current_material;
-                get_shelf_pos(ps, &tx, &ty);
-                nav_goto(tx, ty);
-                enter_state(TASK_P2_PLACE_MATERIAL);
+    case TASK_B1_PLACE_R1:
+    case TASK_B1_PLACE_R2:
+    case TASK_B1_PLACE_R3:
+    {
+        uint8_t idx = state_index3(task_state, TASK_B1_PLACE_R1, TASK_B1_PLACE_R2, TASK_B1_PLACE_R3);
+        uint8_t pos_num = qr_task.batch1_positions[idx];
+        float px, py;
+        get_rough_pos(pos_num, &px, &py);
+
+        switch (action_step) {
+        case 0:
+            if (do_tray_pick(idx)) {
+                set_action_step(1);
             }
-        }
-        break;
-
-    case TASK_P2_PLACE_MATERIAL:
-        if (nav_get_state() == NAV_REACHED && action_step < 4) {
+            break;
+        case 1:
+            nav_goto_heading(px, py, 0);
+            set_action_step(2);
+            break;
+        case 2:
+            if (nav_get_state() == NAV_REACHED) {
+                vision_request_position();
+                set_action_step(3);
+            }
+            break;
+        case 3:
+            if (vision_data_available() && vision_current.detected) {
+                nav_goto_vision_offset();
+                set_action_step(4);
+            } else if (step_done(NAV_ALIGN_TIMEOUT_MS)) {
+                set_action_step(5);
+            }
+            break;
+        case 4:
+            if (wait_reached_or_timeout()) {
+                set_action_step(5);
+            }
+            break;
+        case 5:
             if (do_place()) {
-                current_material++;
-                current_pick_shelf--;
-                enter_state(TASK_P2_GOTO_PICK_SHELF);
+                task_state_t next[] = {TASK_B1_PLACE_R2, TASK_B1_PLACE_R3, TASK_B1_MOVE_1};
+                enter_state(next[idx]);
             }
+            break;
+        default:
+            set_action_step(0);
+            break;
         }
         break;
+    }
 
-    /* ========== PHASE 3: return home ========== */
+    case TASK_B1_MOVE_1:
+    case TASK_B1_MOVE_2:
+    case TASK_B1_MOVE_3:
+    {
+        uint8_t idx = state_index3(task_state, TASK_B1_MOVE_1, TASK_B1_MOVE_2, TASK_B1_MOVE_3);
+        uint8_t rough_pos = qr_task.batch1_positions[idx];
+        uint8_t temp_pos = qr_task.batch1_positions[idx];
+        float rx, ry, tx, ty;
+        get_rough_pos(rough_pos, &rx, &ry);
+        get_temp_pos(temp_pos, &tx, &ty);
+
+        switch (action_step) {
+        case 0:
+            nav_goto_heading(rx, ry, 0);
+            set_action_step(1);
+            break;
+        case 1:
+            if (nav_get_state() == NAV_REACHED) {
+                vision_request_position();
+                set_action_step(2);
+            }
+            break;
+        case 2:
+            if (vision_data_available() && vision_current.detected) {
+                nav_goto_vision_offset();
+                set_action_step(3);
+            } else if (step_done(NAV_ALIGN_TIMEOUT_MS)) {
+                set_action_step(4);
+            }
+            break;
+        case 3:
+            if (wait_reached_or_timeout()) {
+                set_action_step(4);
+            }
+            break;
+        case 4:
+            if (do_pick()) {
+                set_action_step(5);
+            }
+            break;
+        case 5:
+            if (do_tray_drop(idx)) {
+                set_action_step(6);
+            }
+            break;
+        case 6:
+            nav_goto_heading(tx, ty, 0);
+            set_action_step(7);
+            break;
+        case 7:
+            if (nav_get_state() == NAV_REACHED) {
+                vision_request_position();
+                set_action_step(8);
+            }
+            break;
+        case 8:
+            if (vision_data_available() && vision_current.detected) {
+                nav_goto_vision_offset();
+                set_action_step(9);
+            } else if (step_done(NAV_ALIGN_TIMEOUT_MS)) {
+                set_action_step(10);
+            }
+            break;
+        case 9:
+            if (wait_reached_or_timeout()) {
+                set_action_step(10);
+            }
+            break;
+        case 10:
+            if (do_tray_pick(idx)) {
+                set_action_step(11);
+            }
+            break;
+        case 11:
+            if (do_place()) {
+                task_state_t next[] = {TASK_B1_MOVE_2, TASK_B1_MOVE_3, TASK_B2_PICK_1};
+                enter_state(next[idx]);
+            }
+            break;
+        default:
+            set_action_step(0);
+            break;
+        }
+        break;
+    }
+
+    case TASK_B2_PICK_1:
+    case TASK_B2_PICK_2:
+    case TASK_B2_PICK_3:
+    {
+        uint8_t idx = state_index3(task_state, TASK_B2_PICK_1, TASK_B2_PICK_2, TASK_B2_PICK_3);
+        uint8_t color = qr_task.batch2_colors[idx];
+
+        switch (action_step) {
+        case 0:
+            nav_goto_heading(RAW_MATERIAL_X, RAW_MATERIAL_Y, 0);
+            set_action_step(1);
+            break;
+        case 1:
+            if (nav_get_state() == NAV_REACHED) {
+                vision_request_recognize();
+                set_action_step(2);
+            }
+            break;
+        case 2:
+            if (vision_data_available() && vision_current.detected) {
+                if (vision_current.barcode_id == color) {
+                    nav_goto_vision_offset();
+                    set_action_step(3);
+                } else {
+                    vision_request_recognize();
+                }
+            } else if (step_done(VISION_WAIT_TIMEOUT_MS)) {
+                vision_request_recognize();
+                step_tick = HAL_GetTick();
+            }
+            break;
+        case 3:
+            if (wait_reached_or_timeout()) {
+                set_action_step(4);
+            }
+            break;
+        case 4:
+            if (do_pick()) {
+                task_state_t next[] = {TASK_B2_TRAY_1, TASK_B2_TRAY_2, TASK_B2_TRAY_3};
+                enter_state(next[idx]);
+            }
+            break;
+        default:
+            set_action_step(0);
+            break;
+        }
+        break;
+    }
+
+    case TASK_B2_TRAY_1:
+    case TASK_B2_TRAY_2:
+    case TASK_B2_TRAY_3:
+    {
+        uint8_t idx = state_index3(task_state, TASK_B2_TRAY_1, TASK_B2_TRAY_2, TASK_B2_TRAY_3);
+        if (do_tray_drop(idx)) {
+            task_state_t next[] = {TASK_B2_PICK_2, TASK_B2_PICK_3, TASK_B2_PLACE_R1};
+            enter_state(next[idx]);
+        }
+        break;
+    }
+
+    case TASK_B2_PLACE_R1:
+    case TASK_B2_PLACE_R2:
+    case TASK_B2_PLACE_R3:
+    {
+        uint8_t idx = state_index3(task_state, TASK_B2_PLACE_R1, TASK_B2_PLACE_R2, TASK_B2_PLACE_R3);
+        uint8_t pos_num = qr_task.batch2_positions[idx];
+        float px, py;
+        get_rough_pos(pos_num, &px, &py);
+
+        switch (action_step) {
+        case 0:
+            if (do_tray_pick(idx)) {
+                set_action_step(1);
+            }
+            break;
+        case 1:
+            nav_goto_heading(px, py, 0);
+            set_action_step(2);
+            break;
+        case 2:
+            if (nav_get_state() == NAV_REACHED) {
+                vision_request_position();
+                set_action_step(3);
+            }
+            break;
+        case 3:
+            if (vision_data_available() && vision_current.detected) {
+                nav_goto_vision_offset();
+                set_action_step(4);
+            } else if (step_done(NAV_ALIGN_TIMEOUT_MS)) {
+                set_action_step(5);
+            }
+            break;
+        case 4:
+            if (wait_reached_or_timeout()) {
+                set_action_step(5);
+            }
+            break;
+        case 5:
+            if (do_place()) {
+                task_state_t next[] = {TASK_B2_PLACE_R2, TASK_B2_PLACE_R3, TASK_B2_MOVE_1};
+                enter_state(next[idx]);
+            }
+            break;
+        default:
+            set_action_step(0);
+            break;
+        }
+        break;
+    }
+
+    case TASK_B2_MOVE_1:
+    case TASK_B2_MOVE_2:
+    case TASK_B2_MOVE_3:
+    {
+        uint8_t idx = state_index3(task_state, TASK_B2_MOVE_1, TASK_B2_MOVE_2, TASK_B2_MOVE_3);
+        uint8_t rough_pos = qr_task.batch2_positions[idx];
+        uint8_t temp_pos = qr_task.batch2_positions[idx];
+        float rx, ry, tx, ty;
+        get_rough_pos(rough_pos, &rx, &ry);
+        get_temp_pos(temp_pos, &tx, &ty);
+
+        switch (action_step) {
+        case 0:
+            nav_goto_heading(rx, ry, 0);
+            set_action_step(1);
+            break;
+        case 1:
+            if (nav_get_state() == NAV_REACHED) {
+                vision_request_position();
+                set_action_step(2);
+            }
+            break;
+        case 2:
+            if (vision_data_available() && vision_current.detected) {
+                nav_goto_vision_offset();
+                set_action_step(3);
+            } else if (step_done(NAV_ALIGN_TIMEOUT_MS)) {
+                set_action_step(4);
+            }
+            break;
+        case 3:
+            if (wait_reached_or_timeout()) {
+                set_action_step(4);
+            }
+            break;
+        case 4:
+            if (do_pick()) {
+                set_action_step(5);
+            }
+            break;
+        case 5:
+            if (do_tray_drop(idx)) {
+                set_action_step(6);
+            }
+            break;
+        case 6:
+            nav_goto_heading(tx, ty, 0);
+            set_action_step(7);
+            break;
+        case 7:
+            if (nav_get_state() == NAV_REACHED) {
+                vision_request_position();
+                set_action_step(8);
+            }
+            break;
+        case 8:
+            if (vision_data_available() && vision_current.detected) {
+                nav_goto_vision_offset();
+                set_action_step(9);
+            } else if (step_done(NAV_ALIGN_TIMEOUT_MS)) {
+                set_action_step(10);
+            }
+            break;
+        case 9:
+            if (wait_reached_or_timeout()) {
+                set_action_step(10);
+            }
+            break;
+        case 10:
+            if (do_tray_pick(idx)) {
+                set_action_step(11);
+            }
+            break;
+        case 11:
+            if (do_place_stack()) {
+                task_state_t next[] = {TASK_B2_MOVE_2, TASK_B2_MOVE_3, TASK_RETURN_HOME};
+                enter_state(next[idx]);
+            }
+            break;
+        default:
+            set_action_step(0);
+            break;
+        }
+        break;
+    }
 
     case TASK_RETURN_HOME:
-        nav_goto_heading(START_X, START_Y, START_ANGLE);
-        enter_state(TASK_DONE);
+        if (action_step == 0) {
+            nav_goto_heading(START_X, START_Y, START_ANGLE);
+            set_action_step(1);
+        }
+        if (nav_get_state() == NAV_REACHED) {
+            enter_state(TASK_DONE);
+        }
         break;
 
     case TASK_DONE:
-        if (nav_get_state() == NAV_REACHED) {
-            chassis_stop();
-        }
+        chassis_stop();
+        break;
+
+    default:
+        chassis_stop();
+        enter_state(TASK_DONE);
         break;
     }
 }

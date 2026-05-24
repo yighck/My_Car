@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"C:/Users/Yi/Desktop/智能物流小车/比赛文档/\")",
+      "Read(//c/Users/Yi/Desktop/智能物流小车/比赛文档/**)",
+      "Bash(pdftotext -layout \"C:/Users/Yi/Desktop/智能物流小车/比赛文档/附件2-1-2027年第十届中国大学生工创大赛智能+工程创新赛道命题与运行（发布稿）.pdf\" -)",
+      "Bash(pdftotext \"C:/Users/Yi/Desktop/智能物流小车/比赛文档/附件2-1-2027年第十届中国大学生工创大赛智能+工程创新赛道命题与运行（发布稿）.pdf\" -)",
+      "Bash(python -c ' *)",
+      "Bash(pip install *)",
+      "Bash(pdftotext -layout -enc \"UTF-8\" \"C:/Users/Yi/Desktop/智能物流小车/比赛文档/关于举办2027年第十届中国大学生工程实践与创新能力大赛的预通知（正式稿）.pdf\" -)",
+      "Bash(ls \"c:/Users/Yi/Desktop/智能物流小车/文档/\")",
+      "Read(//c/Users/Yi/Desktop/智能物流小车/文档/**)"
+    ]
+  }
+}

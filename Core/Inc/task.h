@@ -7,76 +7,93 @@
 #include "positioning.h"
 #include "vision.h"
 #include "navigation.h"
+#include "qrcode.h"
 
-/* ========== Task State Machine ========== */
+/* ========== 任务状态机 ========== */
 typedef enum {
-    /* Phase 1: Pick from warehouse, deliver to numbered shelves */
-    TASK_P1_SCAN_BARCODE,
-    TASK_P1_GOTO_WAREHOUSE,
-    TASK_P1_ALIGN_WAREHOUSE,
-    TASK_P1_PICK_MATERIAL,
-    TASK_P1_GOTO_SHELF,
-    TASK_P1_PLACE_MATERIAL,
+    TASK_INIT,
+    TASK_WAIT_QR,
 
-    /* Phase 2: Pick from material shelves, deliver to numbered shelves */
-    TASK_P2_GOTO_PICK_SHELF,
-    TASK_P2_ALIGN_PICK_SHELF,
-    TASK_P2_PICK_MATERIAL,
-    TASK_P2_GOTO_PLACE_SHELF,
-    TASK_P2_PLACE_MATERIAL,
+    /* 第一批: 原料区取料→放托盘→运到粗加工区→放粗加工→搬到暂存区 */
+    TASK_B1_PICK_1,         /* 原料区取第1个 */
+    TASK_B1_TRAY_1,         /* 放到托盘 */
+    TASK_B1_PICK_2,         /* 原料区取第2个 */
+    TASK_B1_TRAY_2,         /* 放到托盘 */
+    TASK_B1_PICK_3,         /* 原料区取第3个 */
+    TASK_B1_TRAY_3,         /* 放到托盘 */
+    TASK_B1_PLACE_R1,       /* 粗加工区放第1个 */
+    TASK_B1_PLACE_R2,       /* 粗加工区放第2个 */
+    TASK_B1_PLACE_R3,       /* 粗加工区放第3个 */
+    TASK_B1_MOVE_1,         /* 粗加工区搬到暂存区第1个 */
+    TASK_B1_MOVE_2,         /* 粗加工区搬到暂存区第2个 */
+    TASK_B1_MOVE_3,         /* 粗加工区搬到暂存区第3个 */
 
-    /* Phase 3: Return to start zone */
+    /* 第二批: 同上流程, 码垛到暂存区 */
+    TASK_B2_PICK_1,
+    TASK_B2_TRAY_1,
+    TASK_B2_PICK_2,
+    TASK_B2_TRAY_2,
+    TASK_B2_PICK_3,
+    TASK_B2_TRAY_3,
+    TASK_B2_PLACE_R1,
+    TASK_B2_PLACE_R2,
+    TASK_B2_PLACE_R3,
+    TASK_B2_MOVE_1,
+    TASK_B2_MOVE_2,
+    TASK_B2_MOVE_3,
+
+    /* 返回 */
     TASK_RETURN_HOME,
     TASK_DONE
 } task_state_t;
 
-/* ========== Arena Waypoints (meters) ========== */
-/*
- * Coordinate system: set according to your arena layout
- * Origin at one corner, X = toward material area, Y = left
- *
- * TODO: Measure and set actual coordinates for your arena
- */
-#define START_X       0.3f
-#define START_Y       1.0f
-#define START_ANGLE   0.0f
+/* ========== 场地坐标 (米) ========== */
+/* 坐标系: 场地左下角为原点, x向右, y向上 */
 
-/* Warehouse positions (where materials are in the warehouse) */
-#define WAREHOUSE_1_X  1.2f
-#define WAREHOUSE_1_Y  0.3f
-#define WAREHOUSE_2_X  1.2f
-#define WAREHOUSE_2_Y  0.6f
-#define WAREHOUSE_3_X  1.2f
-#define WAREHOUSE_3_Y  0.9f
-#define WAREHOUSE_4_X  1.2f
-#define WAREHOUSE_4_Y  1.2f
+/* 启停区 (抽签选择, 取消注释对应的一组) */
+#if 0  /* 启停区1 */
+#define START_X             2.250f
+#define START_Y             2.250f
+#else  /* 启停区2 */
+#define START_X             2.250f
+#define START_Y             0.150f
+#endif
+#define START_ANGLE         M_PI    /* 朝x负方向 */
 
-/* Material shelf positions (numbered shelves 1-7) */
-#define SHELF_1_X  2.0f
-#define SHELF_1_Y  0.3f
-#define SHELF_2_X  2.0f
-#define SHELF_2_Y  0.6f
-#define SHELF_3_X  2.0f
-#define SHELF_3_Y  0.9f
-#define SHELF_4_X  2.0f
-#define SHELF_4_Y  1.2f
-#define SHELF_5_X  2.5f
-#define SHELF_5_Y  0.3f
-#define SHELF_6_X  2.5f
-#define SHELF_6_Y  0.6f
-#define SHELF_7_X  2.5f
-#define SHELF_7_Y  0.9f
+/* 原料区 (旋转转盘中心) */
+#define RAW_MATERIAL_X      1.200f
+#define RAW_MATERIAL_Y      2.400f
 
-/* ========== Material Tracking ========== */
-#define MAX_MATERIALS  4
-#define INVALID_SHELF  0
+/* 粗加工区 (3个圆环位置, 按任务码编号1-3) */
+#define ROUGH_1_X           1.050f
+#define ROUGH_1_Y           0.075f
+#define ROUGH_2_X           1.200f
+#define ROUGH_2_Y           0.075f
+#define ROUGH_3_X           1.350f
+#define ROUGH_3_Y           0.075f
 
-/* ========== Functions ========== */
+/* 暂存区 (3个圆环位置, 按任务码编号1-3) */
+#define TEMP_1_X            0.075f
+#define TEMP_1_Y            1.350f
+#define TEMP_2_X            0.075f
+#define TEMP_2_Y            1.200f
+#define TEMP_3_X            0.075f
+#define TEMP_3_Y            1.050f
+
+/* 码垛: 第二批暂存区下降补偿 (秒) */
+#define STACK_EXTRA_MS      500
+
+/* ========== 颜色编号定义 ========== */
+#define COLOR_RED           1
+#define COLOR_YELLOW        2
+#define COLOR_BLUE          3
+#define COLOR_GREEN         4
+#define COLOR_BLACK         5
+#define COLOR_LIGHT_BLUE    6
+
+/* ========== 函数声明 ========== */
 void task_init(void);
 void task_update(void);
 task_state_t task_get_state(void);
-
-/* ========== State ========== */
-extern task_state_t task_state;
 
 #endif /* __TASK_H */

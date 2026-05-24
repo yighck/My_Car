@@ -27,6 +27,7 @@
 #include "positioning.h"
 #include "vision.h"
 #include "navigation.h"
+#include "qrcode.h"
 #include "task.h"
 /* USER CODE END Includes */
 
@@ -57,18 +58,20 @@ UART_HandleTypeDef huart3;
 UART_HandleTypeDef huart6;
 
 /* USER CODE BEGIN PV */
-uart_ring_buf_t uart1_rx_buf;
-uart_ring_buf_t uart2_rx_buf;
-uart_ring_buf_t uart3_rx_buf;
-uart_ring_buf_t uart4_rx_buf;
-uart_ring_buf_t uart5_rx_buf;
+uart_ring_buf_t uart1_rx_buf;  /* USART1: Linux视觉通信 */
+uart_ring_buf_t uart2_rx_buf;  /* USART2: 底盘电机+升降电机 */
+uart_ring_buf_t uart3_rx_buf;  /* USART3: OPS9定位 */
+uart_ring_buf_t uart4_rx_buf;  /* UART4:  串口屏 */
+uart_ring_buf_t uart5_rx_buf;  /* UART5:  二维码模块 */
+uart_ring_buf_t uart6_rx_buf;  /* USART6: 调试串口 */
 
-/* Single-byte receive buffer for each UART */
+/* 每个串口的单字节接收缓冲区 */
 uint8_t uart1_rx_byte;
 uint8_t uart2_rx_byte;
 uint8_t uart3_rx_byte;
 uint8_t uart4_rx_byte;
 uint8_t uart5_rx_byte;
+uint8_t uart6_rx_byte;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -129,7 +132,7 @@ int main(void)
   MX_USART3_UART_Init();
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
-  /* Enable UART NVIC interrupts */
+  /* 使能串口中断 */
   HAL_NVIC_SetPriority(USART1_IRQn, 6, 0);
   HAL_NVIC_EnableIRQ(USART1_IRQn);
   HAL_NVIC_SetPriority(USART2_IRQn, 6, 0);
@@ -143,29 +146,32 @@ int main(void)
   HAL_NVIC_SetPriority(USART6_IRQn, 6, 0);
   HAL_NVIC_EnableIRQ(USART6_IRQn);
 
-  /* Initialize ring buffers */
+  /* 初始化环形缓冲区 */
   ring_buf_init(&uart1_rx_buf);
   ring_buf_init(&uart2_rx_buf);
   ring_buf_init(&uart3_rx_buf);
   ring_buf_init(&uart4_rx_buf);
   ring_buf_init(&uart5_rx_buf);
+  ring_buf_init(&uart6_rx_buf);
 
-  /* Start UART receive interrupt (1 byte at a time) */
+  /* 启动串口接收中断 (每次1字节) */
   HAL_UART_Receive_IT(&huart1, &uart1_rx_byte, 1);
   HAL_UART_Receive_IT(&huart2, &uart2_rx_byte, 1);
   HAL_UART_Receive_IT(&huart3, &uart3_rx_byte, 1);
   HAL_UART_Receive_IT(&huart4, &uart4_rx_byte, 1);
   HAL_UART_Receive_IT(&huart5, &uart5_rx_byte, 1);
+  HAL_UART_Receive_IT(&huart6, &uart6_rx_byte, 1);
 
-  /* Initialize modules */
+  /* 初始化各模块 */
   chassis_init();
   actuator_init();
   positioning_init();
   vision_init();
   navigation_init();
+  qr_code_init();
   task_init();
 
-  /* Startup delay - wait for sensors to stabilize */
+  /* 启动延时 - 等待传感器稳定 */
   HAL_Delay(500);
   /* USER CODE END 2 */
 
@@ -198,13 +204,12 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 64;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 4;
+  RCC_OscInitStruct.PLL.PLLN = 168;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
@@ -218,10 +223,10 @@ void SystemClock_Config(void)
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
   {
     Error_Handler();
   }
@@ -247,7 +252,7 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = SERVO_TIM_PRESCALER;
+  htim3.Init.Prescaler = SERVO_TIM3_PRESCALER;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = SERVO_TIM_PERIOD;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -311,7 +316,7 @@ static void MX_TIM8_Init(void)
 
   /* USER CODE END TIM8_Init 1 */
   htim8.Instance = TIM8;
-  htim8.Init.Prescaler = SERVO_TIM_PRESCALER;  /* Same as TIM3 for consistent pulse width */
+  htim8.Init.Prescaler = SERVO_TIM8_PRESCALER;
   htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim8.Init.Period = SERVO_TIM_PERIOD;
   htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -512,7 +517,7 @@ static void MX_USART3_UART_Init(void)
 
   /* USER CODE END USART3_Init 1 */
   huart3.Instance = USART3;
-  huart3.Init.BaudRate = 921600;  /* OPS9 requires 921600 baud */
+  huart3.Init.BaudRate = 115200;
   huart3.Init.WordLength = UART_WORDLENGTH_8B;
   huart3.Init.StopBits = UART_STOPBITS_1;
   huart3.Init.Parity = UART_PARITY_NONE;
@@ -569,7 +574,6 @@ static void MX_USART6_UART_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
   /* USER CODE END MX_GPIO_Init_1 */
@@ -581,23 +585,13 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : PB15 */
-  GPIO_InitStruct.Pin = GPIO_PIN_15;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
-/* UART receive complete callback - puts byte into ring buffer and restarts RX */
+/* 串口接收完成回调 - 将字节存入环形缓冲区并重新启动接收 */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1) {
@@ -620,6 +614,10 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         ring_buf_put(&uart5_rx_buf, uart5_rx_byte);
         HAL_UART_Receive_IT(&huart5, &uart5_rx_byte, 1);
     }
+    else if (huart->Instance == USART6) {
+        ring_buf_put(&uart6_rx_buf, uart6_rx_byte);
+        HAL_UART_Receive_IT(&huart6, &uart6_rx_byte, 1);
+    }
 }
 /* USER CODE END 4 */
 
@@ -630,7 +628,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
+  /* 可在此添加自定义错误处理 */
   __disable_irq();
   while (1)
   {
@@ -648,8 +646,7 @@ void Error_Handler(void)
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* 可在此添加断言失败的错误处理 */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */

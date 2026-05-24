@@ -4,7 +4,7 @@
 #include "common.h"
 #include "positioning.h"
 
-/* ========== PID Parameters ========== */
+/* ========== PID 参数 ========== */
 typedef struct {
     float kp;
     float ki;
@@ -15,20 +15,29 @@ typedef struct {
     float output_max;
 } pid_t;
 
-/* ========== Navigation State ========== */
+/* ========== 导航状态 ========== */
 typedef enum {
     NAV_IDLE,
     NAV_RUNNING,
     NAV_REACHED
 } nav_state_t;
 
-/* ========== Navigation Parameters ========== */
-#define NAV_POS_TOLERANCE     0.02f   /* Position tolerance (m) */
-#define NAV_ANGLE_TOLERANCE   0.05f   /* Angle tolerance (rad) */
-#define NAV_MAX_LINEAR_SPEED  0.3f    /* Max linear speed (m/s) */
-#define NAV_MAX_ANGULAR_SPEED 1.5f    /* Max angular speed (rad/s) */
+/* ========== 导航参数 ========== */
+#define NAV_POS_TOLERANCE     0.02f   /* 位置容差 (m) */
+#define NAV_ANGLE_TOLERANCE   0.05f   /* 角度容差 (rad) */
+#define NAV_MAX_LINEAR_SPEED  0.3f    /* 最大线速度 (m/s) */
+#define NAV_MAX_ANGULAR_SPEED 1.5f    /* 最大角速度 (rad/s) */
 
-/* ========== Functions ========== */
+/* ========== 路径点 ========== */
+typedef struct {
+    float x;
+    float y;
+    float heading;  /* 目标朝向 (rad), NAN = 自动面向目标 */
+} waypoint_t;
+
+#define NAV_MAX_PATH_POINTS  16
+
+/* ========== 函数声明 ========== */
 void navigation_init(void);
 void nav_goto(float target_x, float target_y);
 void nav_goto_heading(float target_x, float target_y, float target_angle);
@@ -37,12 +46,15 @@ void nav_update(void);
 nav_state_t nav_get_state(void);
 void nav_stop(void);
 
-/* ========== PID Utilities ========== */
+/* 路径点导航 */
+void nav_follow_path(const waypoint_t *path, uint8_t count);
+
+/* ========== PID 工具函数 ========== */
 void pid_init(pid_t *pid, float kp, float ki, float kd,
               float out_min, float out_max);
 float pid_compute(pid_t *pid, float error, float dt);
 
-/* ========== Data ========== */
+/* ========== 数据 ========== */
 extern pid_t pid_linear;
 extern pid_t pid_angular;
 extern nav_state_t nav_state;

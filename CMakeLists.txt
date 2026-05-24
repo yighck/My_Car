@@ -49,6 +49,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/positioning.c
     Core/Src/vision.c
     Core/Src/navigation.c
+    Core/Src/qrcode.c
     Core/Src/task.c
 )
 

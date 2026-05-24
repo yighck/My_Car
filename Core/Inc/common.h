@@ -22,8 +22,10 @@ extern UART_HandleTypeDef huart5;
 extern UART_HandleTypeDef huart6;
 
 /* ========== Timer Channel Defines ========== */
-#define SERVO_TIM_PRESCALER   63    /* 64MHz/(63+1)=1MHz tick */
-#define SERVO_TIM_PERIOD      19999 /* 1MHz/(19999+1)=50Hz   */
+/* TIM3 clock is 84MHz, TIM8 clock is 168MHz with the current clock tree. */
+#define SERVO_TIM3_PRESCALER  83
+#define SERVO_TIM8_PRESCALER  167
+#define SERVO_TIM_PERIOD      19999 /* 1MHz/(19999+1)=50Hz */
 
 #define SERVO_MIN_PULSE       500   /* 0.5ms = 0 degree   */
 #define SERVO_MAX_PULSE       2500  /* 2.5ms = 180 degree */
@@ -43,12 +45,13 @@ typedef struct {
     volatile uint16_t tail;
 } uart_ring_buf_t;
 
-/* ========== Global UART Receive Buffers ========== */
-extern uart_ring_buf_t uart1_rx_buf;  /* Vision    */
-extern uart_ring_buf_t uart2_rx_buf;  /* Chassis   */
-extern uart_ring_buf_t uart3_rx_buf;  /* OPS9      */
-extern uart_ring_buf_t uart4_rx_buf;  /* Lift      */
-extern uart_ring_buf_t uart5_rx_buf;  /* Screen/QR */
+/* ========== 全局串口接收缓冲区 ========== */
+extern uart_ring_buf_t uart1_rx_buf;  /* USART1: Linux视觉通信 */
+extern uart_ring_buf_t uart2_rx_buf;  /* USART2: 底盘电机+升降电机 */
+extern uart_ring_buf_t uart3_rx_buf;  /* USART3: OPS9定位 */
+extern uart_ring_buf_t uart4_rx_buf;  /* UART4:  串口屏 */
+extern uart_ring_buf_t uart5_rx_buf;  /* UART5:  二维码模块 */
+extern uart_ring_buf_t uart6_rx_buf;  /* USART6: 调试串口 */
 
 /* ========== Ring Buffer Operations ========== */
 static inline void ring_buf_init(uart_ring_buf_t *buf)

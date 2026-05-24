@@ -20,26 +20,37 @@ uint16_t emm_crc16(uint8_t *data, uint8_t len)
 
 /* ========== Send speed command to Emm_V5.0 (0xF6) ==========
  * addr:   motor address (0x00-0xFF)
- * speed:  signed speed in 0.1 RPM (e.g. 500 = 50.0 RPM)
- *         positive = CW, negative = CCW (bit0 of speed byte)
+ * speed_rpm: signed speed in RPM
+ *            positive = CW, negative = CCW
  * accel:  acceleration in 1 step/s² (0=instant)
  */
-void emm_send_speed(UART_HandleTypeDef *huart, uint8_t addr, int16_t speed, uint8_t accel)
+void emm_send_speed(UART_HandleTypeDef *huart, uint8_t addr, int16_t speed_rpm, uint8_t accel)
 {
+#if EMM_USE_MODBUS_CRC
     uint8_t frame[9];
+#else
+    uint8_t frame[8];
+#endif
+    uint16_t speed_abs = (speed_rpm < 0) ? (uint16_t)(-speed_rpm) : (uint16_t)speed_rpm;
+
     frame[0] = addr;
     frame[1] = 0xF6;           /* Speed control function code */
-    frame[2] = 0x00;           /* Default flag */
-    frame[3] = (uint8_t)((speed >> 8) & 0xFF);  /* Speed high byte */
-    frame[4] = (uint8_t)(speed & 0xFF);         /* Speed low byte */
+    frame[2] = (speed_rpm < 0) ? 0x01 : 0x00;   /* 00=CW, 01=CCW */
+    frame[3] = (uint8_t)((speed_abs >> 8) & 0xFF);
+    frame[4] = (uint8_t)(speed_abs & 0xFF);
     frame[5] = accel;                           /* Acceleration */
     frame[6] = 0x00;           /* Sync flag (0=execute immediately) */
 
+#if EMM_USE_MODBUS_CRC
     uint16_t crc = emm_crc16(frame, 7);
     frame[7] = (uint8_t)(crc & 0xFF);        /* CRC low */
     frame[8] = (uint8_t)((crc >> 8) & 0xFF); /* CRC high */
 
     HAL_UART_Transmit(huart, frame, 9, 20);
+#else
+    frame[7] = 0x6B;
+    HAL_UART_Transmit(huart, frame, 8, 20);
+#endif
 }
 
 /* ========== Stop motor (0xFE) ==========
@@ -48,29 +59,38 @@ void emm_send_speed(UART_HandleTypeDef *huart, uint8_t addr, int16_t speed, uint
  */
 void emm_stop(UART_HandleTypeDef *huart, uint8_t addr, bool lock)
 {
+#if EMM_USE_MODBUS_CRC
     uint8_t frame[6];
+#else
+    uint8_t frame[5];
+#endif
     frame[0] = addr;
     frame[1] = 0xFE;  /* Stop command */
     frame[2] = 0x98;  /* Sub-command for stop */
-    frame[3] = lock ? 0x01 : 0x00;
+    frame[3] = 0x00;  /* Sync flag (0=execute immediately) */
 
+#if EMM_USE_MODBUS_CRC
     uint16_t crc = emm_crc16(frame, 4);
     frame[4] = (uint8_t)(crc & 0xFF);
     frame[5] = (uint8_t)((crc >> 8) & 0xFF);
 
     HAL_UART_Transmit(huart, frame, 6, 10);
+#else
+    frame[4] = 0x6B;
+    HAL_UART_Transmit(huart, frame, 5, 10);
+#endif
+
+    (void)lock;
 }
 
-/* Convert m/s to 0.1 RPM for Emm_V5.0 */
+/* Convert m/s to RPM for Emm_V5.0 */
 static int16_t speed_to_cmd(float speed_ms)
 {
-    /* v = 2*pi*R*RPM/60  =>  RPM = v*60/(2*pi*R)
-     * cmd = RPM*10 = v*600/(2*pi*R) */
-    float rpm10 = speed_ms * 600.0f / (2.0f * M_PI * CHASSIS_WHEEL_RADIUS);
-    int16_t cmd = (int16_t)rpm10;
-    /* Clamp to max (Emm_V5.0 max ~3000 = 300 RPM) */
-    if (cmd > 3000) cmd = 3000;
-    if (cmd < -3000) cmd = -3000;
+    /* v = 2*pi*R*RPM/60  =>  RPM = v*60/(2*pi*R) */
+    float rpm = speed_ms * 60.0f / (2.0f * M_PI * CHASSIS_WHEEL_RADIUS);
+    int16_t cmd = (int16_t)rpm;
+    if (cmd > 300) cmd = 300;
+    if (cmd < -300) cmd = -300;
     return cmd;
 }
 
