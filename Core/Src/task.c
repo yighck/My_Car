@@ -310,7 +310,8 @@ void task_update(void)
         break;
 
     case TASK_WAIT_QR:
-        if (qr_code_available()) {
+        /* OPS9定位有效 + QR码已扫描 → 开始任务 */
+        if (positioning_is_valid() && qr_code_available()) {
             enter_state(TASK_B1_PICK_1);
         }
         break;
