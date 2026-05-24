@@ -18,15 +18,6 @@ static uint8_t  vision_retry_cnt = 0;  /* 视觉重试计数 */
 /* 抓取统计 */
 task_stats_t task_stats = {0};
 
-task_state_t task_state = TASK_INIT;
-
-static uint32_t state_enter_tick = 0;
-static uint8_t  action_step = 0;
-static uint32_t step_tick = 0;
-
-static uint8_t  motion_step = 0;
-static uint32_t motion_tick = 0;
-
 static void get_rough_pos(uint8_t pos_num, float *x, float *y)
 {
     static const float rx[] = {0, ROUGH_1_X, ROUGH_2_X, ROUGH_3_X};
@@ -296,6 +287,12 @@ static bool wait_reached_or_timeout(void)
     return nav_get_state() == NAV_REACHED || step_done(NAV_ALIGN_TIMEOUT_MS);
 }
 
+/* 检查 do_tray_pick 是否已完成夹取(夹爪已闭合, 正在提升) */
+static bool tray_pick_gripper_closed(void)
+{
+    return motion_step >= 3;
+}
+
 void task_init(void)
 {
     enter_state(TASK_INIT);
@@ -356,11 +353,10 @@ void task_update(void)
                 vision_retry_cnt++;
                 if (vision_retry_cnt >= VISION_MAX_RETRIES) {
                     task_stats.vision_timeouts++;
-                    set_action_step(4);
-                } else {
-                    vision_request_recognize();
-                    step_tick = HAL_GetTick();
+                    vision_retry_cnt = 0;
                 }
+                vision_request_recognize();
+                step_tick = HAL_GetTick();
             }
             break;
         case 3:
@@ -407,6 +403,10 @@ void task_update(void)
         case 0:
             if (do_tray_pick(idx)) {
                 set_action_step(1);
+            } else if (idx == 2 && tray_pick_gripper_closed()) {
+                /* 最后一个: 夹爪闭合后立即出发, 提升和导航并行 */
+                nav_goto_heading(px, py, ROUGH_FACE);
+                set_action_step(2);
             }
             break;
         case 1:
@@ -516,6 +516,9 @@ void task_update(void)
         case 10:
             if (do_tray_pick(idx)) {
                 set_action_step(11);
+            } else if (idx == 2 && tray_pick_gripper_closed()) {
+                nav_goto_heading(tx, ty, TEMP_FACE);
+                set_action_step(11);
             }
             break;
         case 11:
@@ -563,11 +566,10 @@ void task_update(void)
                 vision_retry_cnt++;
                 if (vision_retry_cnt >= VISION_MAX_RETRIES) {
                     task_stats.vision_timeouts++;
-                    set_action_step(4);
-                } else {
-                    vision_request_recognize();
-                    step_tick = HAL_GetTick();
+                    vision_retry_cnt = 0;
                 }
+                vision_request_recognize();
+                step_tick = HAL_GetTick();
             }
             break;
         case 3:
@@ -614,6 +616,9 @@ void task_update(void)
         case 0:
             if (do_tray_pick(idx)) {
                 set_action_step(1);
+            } else if (idx == 2 && tray_pick_gripper_closed()) {
+                nav_goto_heading(px, py, ROUGH_FACE);
+                set_action_step(2);
             }
             break;
         case 1:
@@ -722,6 +727,9 @@ void task_update(void)
             break;
         case 10:
             if (do_tray_pick(idx)) {
+                set_action_step(11);
+            } else if (idx == 2 && tray_pick_gripper_closed()) {
+                nav_goto_heading(tx, ty, TEMP_FACE);
                 set_action_step(11);
             }
             break;
