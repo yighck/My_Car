@@ -51,6 +51,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/navigation.c
     Core/Src/qrcode.c
     Core/Src/task.c
+    Core/Src/obstacle.c
 )
 
 # Add include paths

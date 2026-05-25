@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include "positioning.h"
+#include "obstacle.h"
 
 /* ========== PID 参数 ========== */
 typedef struct {
@@ -19,7 +20,8 @@ typedef struct {
 typedef enum {
     NAV_IDLE,
     NAV_RUNNING,
-    NAV_REACHED
+    NAV_REACHED,
+    NAV_PAUSED       /* 避障暂停 */
 } nav_state_t;
 
 /* ========== 导航参数 ========== */
@@ -45,6 +47,8 @@ void nav_turn_to(float target_angle);
 void nav_update(void);
 nav_state_t nav_get_state(void);
 void nav_stop(void);
+void nav_pause(void);    /* 避障暂停 */
+void nav_resume(void);   /* 避障恢复 */
 
 /* 路径点导航 */
 void nav_follow_path(const waypoint_t *path, uint8_t count);

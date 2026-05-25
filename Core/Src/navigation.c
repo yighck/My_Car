@@ -108,8 +108,22 @@ void nav_turn_to(float angle)
 /* 导航主更新函数 - 在主循环中周期调用 */
 void nav_update(void)
 {
+    obstacle_process();
+
+    if (nav_state == NAV_PAUSED) {
+        if (!obstacle_detected()) {
+            nav_resume();
+        }
+        return;
+    }
     if (nav_state != NAV_RUNNING) return;
     if (!positioning_is_valid()) return;
+
+    /* 运动中: 检查前方障碍 */
+    if (obstacle_detected()) {
+        nav_pause();
+        return;
+    }
 
     uint32_t now = HAL_GetTick();
     float dt = (now - last_update_tick) / 1000.0f;
@@ -193,6 +207,22 @@ void nav_update(void)
 nav_state_t nav_get_state(void)
 {
     return nav_state;
+}
+
+void nav_pause(void)
+{
+    if (nav_state == NAV_RUNNING) {
+        chassis_stop();
+        nav_state = NAV_PAUSED;
+    }
+}
+
+void nav_resume(void)
+{
+    if (nav_state == NAV_PAUSED) {
+        last_update_tick = HAL_GetTick();
+        nav_state = NAV_RUNNING;
+    }
 }
 
 void nav_stop(void)
