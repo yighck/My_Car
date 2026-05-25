@@ -15,6 +15,8 @@ static uint8_t  motion_step = 0;
 static uint32_t motion_tick = 0;
 
 static uint8_t  vision_retry_cnt = 0;  /* 视觉重试计数 */
+static bool     b1_nav_started = false; /* B1最后取料并行导航标志 */
+static bool     b2_nav_started = false; /* B2最后取料并行导航标志 */
 
 /* 抓取统计 */
 task_stats_t task_stats = {0};
@@ -343,10 +345,12 @@ void task_update(void)
         break;
 
     case TASK_NAV_QR:
-        /* 一键启动 → 先导航到二维码板搜索区域 → 等待扫描 */
+        /* 一键启动 → 等OPS9就绪 → 导航到二维码板搜索区域 */
         if (action_step == 0) {
-            nav_goto_heading(QR_SEARCH_X, QR_SEARCH_Y, QR_SEARCH_ANGLE);
-            set_action_step(1);
+            if (positioning_is_valid()) {
+                nav_goto_heading(QR_SEARCH_X, QR_SEARCH_Y, QR_SEARCH_ANGLE);
+                set_action_step(1);
+            }
         }
         if (nav_get_state() == NAV_REACHED) {
             enter_state(TASK_WAIT_QR);
@@ -404,7 +408,15 @@ void task_update(void)
             }
             break;
         case 4:
+            /* 最后一个物块: 夹爪闭合后立即导航到粗加工区, 与提升+转盘并行 */
+            if (idx == 2 && motion_step >= 3 && !b1_nav_started) {
+                float px, py;
+                get_rough_pos(qr_task.batch1_positions[2], &px, &py);
+                nav_goto_heading(px, py, ROUGH_FACE);
+                b1_nav_started = true;
+            }
             if (do_tray_drop(idx)) {
+                b1_nav_started = false;
                 task_stats.pick_successes++;
                 task_state_t next[] = {TASK_B1_PICK_2, TASK_B1_PICK_3, TASK_B1_PLACE_R1};
                 enter_state(next[idx]);
@@ -427,39 +439,39 @@ void task_update(void)
         get_rough_pos(pos_num, &px, &py);
 
         switch (action_step) {
-        case 0:
-            if (do_tray_pick(idx)) {
-                set_action_step(1);
-            } else if (idx == 2 && tray_pick_gripper_closed()) {
-                /* 最后一个: 夹爪闭合后立即出发, 提升和导航并行 */
-                nav_goto_heading(px, py, ROUGH_FACE);
+        case 0:     /* 导航到粗加工区 */
+            nav_goto_heading(px, py, ROUGH_FACE);
+            set_action_step(1);
+            break;
+        case 1:     /* 到达 → 视觉定位 */
+            if (nav_get_state() == NAV_REACHED) {
+                vision_request_position();
                 set_action_step(2);
             }
             break;
-        case 1:
-            nav_goto_heading(px, py, ROUGH_FACE);
-            set_action_step(2);
-            break;
-        case 2:
-            if (nav_get_state() == NAV_REACHED) {
-                vision_request_position();
-                set_action_step(3);
-            }
-            break;
-        case 3:
+        case 2:     /* 视觉找到位置 → 偏移导航 */
             if (vision_data_available() && vision_current.detected) {
                 nav_goto_vision_offset();
-                set_action_step(4);
+                set_action_step(3);
             } else if (step_done(NAV_ALIGN_TIMEOUT_MS)) {
-                set_action_step(5);
+                set_action_step(4);
             }
             break;
-        case 4:
+        case 3:     /* 到达精确位置 */
             if (wait_reached_or_timeout()) {
+                set_action_step(4);
+            }
+            break;
+        case 4:     /* 视觉定位完成 → 从托盘取物 */
+            if (do_tray_pick(idx)) {
+                set_action_step(5);
+            } else if (idx == 2 && tray_pick_gripper_closed()) {
+                /* 最后一个: 夹爪闭合后立即出发, 提升和导航并行 */
+                nav_goto_heading(px, py, ROUGH_FACE);
                 set_action_step(5);
             }
             break;
-        case 5:
+        case 5:     /* 放下物块 */
             if (do_place()) {
                 task_stats.place_successes++;
                 task_state_t next[] = {TASK_B1_PLACE_R2, TASK_B1_PLACE_R3, TASK_B1_MOVE_1};
@@ -605,7 +617,15 @@ void task_update(void)
             }
             break;
         case 4:
+            /* 最后一个物块: 夹爪闭合后立即导航到粗加工区, 与提升+转盘并行 */
+            if (idx == 2 && motion_step >= 3 && !b2_nav_started) {
+                float px, py;
+                get_rough_pos(qr_task.batch2_positions[2], &px, &py);
+                nav_goto_heading(px, py, ROUGH_FACE);
+                b2_nav_started = true;
+            }
             if (do_tray_drop(idx)) {
+                b2_nav_started = false;
                 task_stats.pick_successes++;
                 task_state_t next[] = {TASK_B2_PICK_2, TASK_B2_PICK_3, TASK_B2_PLACE_R1};
                 enter_state(next[idx]);
@@ -628,38 +648,38 @@ void task_update(void)
         get_rough_pos(pos_num, &px, &py);
 
         switch (action_step) {
-        case 0:
-            if (do_tray_pick(idx)) {
-                set_action_step(1);
-            } else if (idx == 2 && tray_pick_gripper_closed()) {
-                nav_goto_heading(px, py, ROUGH_FACE);
+        case 0:     /* 导航到粗加工区 */
+            nav_goto_heading(px, py, ROUGH_FACE);
+            set_action_step(1);
+            break;
+        case 1:     /* 到达 → 视觉定位 */
+            if (nav_get_state() == NAV_REACHED) {
+                vision_request_position();
                 set_action_step(2);
             }
             break;
-        case 1:
-            nav_goto_heading(px, py, ROUGH_FACE);
-            set_action_step(2);
-            break;
-        case 2:
-            if (nav_get_state() == NAV_REACHED) {
-                vision_request_position();
-                set_action_step(3);
-            }
-            break;
-        case 3:
+        case 2:     /* 视觉找到位置 → 偏移导航 */
             if (vision_data_available() && vision_current.detected) {
                 nav_goto_vision_offset();
-                set_action_step(4);
+                set_action_step(3);
             } else if (step_done(NAV_ALIGN_TIMEOUT_MS)) {
-                set_action_step(5);
+                set_action_step(4);
             }
             break;
-        case 4:
+        case 3:     /* 到达精确位置 */
             if (wait_reached_or_timeout()) {
+                set_action_step(4);
+            }
+            break;
+        case 4:     /* 视觉定位完成 → 从托盘取物 */
+            if (do_tray_pick(idx)) {
+                set_action_step(5);
+            } else if (idx == 2 && tray_pick_gripper_closed()) {
+                nav_goto_heading(px, py, ROUGH_FACE);
                 set_action_step(5);
             }
             break;
-        case 5:
+        case 5:     /* 放下物块 */
             if (do_place()) {
                 task_stats.place_successes++;
                 task_state_t next[] = {TASK_B2_PLACE_R2, TASK_B2_PLACE_R3, TASK_B2_RETURN_RAW};
