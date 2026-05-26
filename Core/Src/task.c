@@ -1,9 +1,9 @@
 #include "task.h"
 #include <stdio.h>
 
-#define NAV_ALIGN_TIMEOUT_MS   3000U
-#define VISION_WAIT_TIMEOUT_MS 10000U
-#define VISION_MAX_RETRIES     5U      /* 视觉识别最大重试次数 */
+#define NAV_ALIGN_TIMEOUT_MS   2000U
+#define VISION_WAIT_TIMEOUT_MS 3000U
+#define VISION_MAX_RETRIES     3U      /* 视觉识别最大重试次数 */
 
 task_state_t task_state = TASK_INIT;
 
@@ -112,19 +112,19 @@ static bool do_pick(void)
         set_motion_step(1);
         break;
     case 1:
-        if (motion_done(1000)) {
+        if (motion_done(500)) {
             gripper_close();
             set_motion_step(2);
         }
         break;
     case 2:
-        if (motion_done(500)) {
+        if (motion_done(300)) {
             lift_move_up();
             set_motion_step(3);
         }
         break;
     case 3:
-        if (motion_done(1000)) {
+        if (motion_done(500)) {
             lift_stop();
             set_motion_step(4);
         }
@@ -153,13 +153,13 @@ static bool do_place_with_down_time(uint32_t down_ms)
         }
         break;
     case 2:
-        if (motion_done(500)) {
+        if (motion_done(300)) {
             lift_move_up();
             set_motion_step(3);
         }
         break;
     case 3:
-        if (motion_done(1000)) {
+        if (motion_done(500)) {
             lift_stop();
             set_motion_step(4);
         }
@@ -176,12 +176,12 @@ static bool do_place_with_down_time(uint32_t down_ms)
 
 static bool do_place(void)
 {
-    return do_place_with_down_time(1000);
+    return do_place_with_down_time(500);
 }
 
 static bool do_place_stack(void)
 {
-    return do_place_with_down_time(1000 + STACK_EXTRA_MS);
+    return do_place_with_down_time(500 + STACK_EXTRA_MS);
 }
 
 static bool do_tray_drop(uint8_t slot)
@@ -193,50 +193,50 @@ static bool do_tray_drop(uint8_t slot)
         set_motion_step(1);
         break;
     case 1:     /* 下降 */
-        if (motion_done(300)) {
+        if (motion_done(100)) {
             lift_move_down();
             set_motion_step(2);
         }
         break;
     case 2:     /* 夹爪抓取 */
-        if (motion_done(1000)) {
+        if (motion_done(500)) {
             gripper_close();
             set_motion_step(3);
         }
         break;
     case 3:     /* 上升 */
-        if (motion_done(500)) {
+        if (motion_done(300)) {
             lift_move_up();
             set_motion_step(4);
         }
         break;
     case 4:     /* 旋转夹爪至托盘上方 */
-        if (motion_done(1000)) {
+        if (motion_done(500)) {
             lift_stop();
             gripper_rotate_to_tray();
             set_motion_step(5);
         }
         break;
     case 5:     /* 下降至托盘 */
-        if (motion_done(300)) {
+        if (motion_done(100)) {
             lift_move_down();
             set_motion_step(6);
         }
         break;
     case 6:     /* 夹爪释放 */
-        if (motion_done(1000)) {
+        if (motion_done(500)) {
             gripper_open();
             set_motion_step(7);
         }
         break;
     case 7:     /* 上升 */
-        if (motion_done(500)) {
+        if (motion_done(300)) {
             lift_move_up();
             set_motion_step(8);
         }
         break;
     case 8:     /* 夹爪回位 + 托盘旋转120° */
-        if (motion_done(1000)) {
+        if (motion_done(500)) {
             lift_stop();
             gripper_rotate_center();
             tray_rotate_to_slot(slot);
@@ -244,7 +244,7 @@ static bool do_tray_drop(uint8_t slot)
         }
         break;
     case 9:     /* 等待旋转完成 */
-        if (motion_done(300)) {
+        if (motion_done(100)) {
             return true;
         }
         break;
@@ -265,32 +265,32 @@ static bool do_tray_pick(uint8_t slot)
         set_motion_step(1);
         break;
     case 1:
-        if (motion_done(300)) {
+        if (motion_done(100)) {
             lift_move_down();
             set_motion_step(2);
         }
         break;
     case 2:
-        if (motion_done(1000)) {
+        if (motion_done(500)) {
             gripper_close();
             set_motion_step(3);
         }
         break;
     case 3:
-        if (motion_done(500)) {
+        if (motion_done(300)) {
             lift_move_up();
             set_motion_step(4);
         }
         break;
     case 4:
-        if (motion_done(1000)) {
+        if (motion_done(500)) {
             lift_stop();
             gripper_rotate_center();
             set_motion_step(5);
         }
         break;
     case 5:
-        if (motion_done(300)) {
+        if (motion_done(100)) {
             return true;
         }
         break;
@@ -338,10 +338,13 @@ void task_update(void)
     switch (task_state) {
     case TASK_INIT:
         gripper_open();
-        tray_rotate_to_slot(0);
         gripper_rotate_center();
-        lift_stop();
-        enter_state(TASK_NAV_QR);
+        tray_rotate_to_slot(0);
+        lift_move_up();
+        if (motion_done(1500)) {
+            lift_stop();
+            enter_state(TASK_NAV_QR);
+        }
         break;
 
     case TASK_NAV_QR:
@@ -525,12 +528,16 @@ void task_update(void)
             break;
         case 5:
             if (do_tray_drop(idx)) {
-                set_action_step(6);
+                b1_nav_started = false;
+                set_action_step(7);   /* nav已并行启动, 跳到等待到达 */
+            } else if (motion_step == 7 && !b1_nav_started) {
+                /* 物块已放到托盘, 升降正在上升 → 并行启动导航到暂存区 */
+                nav_goto_heading(tx, ty, TEMP_FACE);
+                b1_nav_started = true;
             }
             break;
         case 6:
-            nav_goto_heading(tx, ty, TEMP_FACE);
-            set_action_step(7);
+            /* 已被并行导航跳过 */
             break;
         case 7:
             if (nav_get_state() == NAV_REACHED) {
@@ -744,12 +751,16 @@ void task_update(void)
             break;
         case 5:
             if (do_tray_drop(idx)) {
-                set_action_step(6);
+                b2_nav_started = false;
+                set_action_step(7);   /* nav已并行启动, 跳到等待到达 */
+            } else if (motion_step == 7 && !b2_nav_started) {
+                /* 物块已放到托盘, 升降正在上升 → 并行启动导航到暂存区 */
+                nav_goto_heading(tx, ty, TEMP_FACE);
+                b2_nav_started = true;
             }
             break;
         case 6:
-            nav_goto_heading(tx, ty, TEMP_FACE);
-            set_action_step(7);
+            /* 已被并行导航跳过 */
             break;
         case 7:
             if (nav_get_state() == NAV_REACHED) {

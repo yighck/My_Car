@@ -21,8 +21,8 @@
 
 /* ========== 升降步进电机 (USART2总线, Emm_V5.0) ========== */
 #define LIFT_MOTOR_ADDR       0x05   /* Lift motor address */
-#define LIFT_SPEED_UP         50     /* 50 RPM up */
-#define LIFT_SPEED_DOWN       -50    /* 50 RPM down */
+#define LIFT_SPEED_UP         100    /* 100 RPM up */
+#define LIFT_SPEED_DOWN       -100   /* 100 RPM down */
 #define LIFT_ACCEL            10     /* Acceleration */
 
 /* ========== Servo Control ========== */
