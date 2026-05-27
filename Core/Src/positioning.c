@@ -12,8 +12,8 @@ static bool positioning_parse_frame(uint8_t *frame)
     if (frame[0] != OPS9_HEADER1 || frame[1] != OPS9_HEADER2) return false;
     if (frame[26] != OPS9_TAIL1 || frame[27] != OPS9_TAIL2) return false;
 
-    /* OPS9 payload order:
-     * heading angle, pitch angle, roll angle, X, Y, heading angular speed. */
+    /* OPS9 载荷顺序:
+     * 航向角, 俯仰角, 横滚角, X, Y, 航向角速度 */
     float angle, x, y;
     memcpy(&angle, &frame[2],  4);
     memcpy(&x,     &frame[14], 4);

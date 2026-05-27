@@ -2,7 +2,7 @@
 
 velocity_t chassis_velocity = {0};
 
-/* ========== Modbus CRC-16 ========== */
+/* ========== Modbus CRC-16 校验 ========== */
 uint16_t emm_crc16(uint8_t *data, uint8_t len)
 {
     uint16_t crc = 0xFFFF;
@@ -18,11 +18,10 @@ uint16_t emm_crc16(uint8_t *data, uint8_t len)
     return crc;
 }
 
-/* ========== Send speed command to Emm_V5.0 (0xF6) ==========
- * addr:   motor address (0x00-0xFF)
- * speed_rpm: signed speed in RPM
- *            positive = CW, negative = CCW
- * accel:  acceleration in 1 step/s² (0=instant)
+/* ========== 发送速度指令到 Emm_V5.0 (0xF6) ==========
+ * addr:      电机地址 (0x00-0xFF)
+ * speed_rpm: 带符号转速 (RPM), 正=顺时针, 负=逆时针
+ * accel:     加速度, 单位 1 step/s² (0=立即)
  */
 void emm_send_speed(UART_HandleTypeDef *huart, uint8_t addr, int16_t speed_rpm, uint8_t accel)
 {
@@ -34,17 +33,17 @@ void emm_send_speed(UART_HandleTypeDef *huart, uint8_t addr, int16_t speed_rpm, 
     uint16_t speed_abs = (speed_rpm < 0) ? (uint16_t)(-speed_rpm) : (uint16_t)speed_rpm;
 
     frame[0] = addr;
-    frame[1] = 0xF6;           /* Speed control function code */
-    frame[2] = (speed_rpm < 0) ? 0x01 : 0x00;   /* 00=CW, 01=CCW */
+    frame[1] = 0xF6;           /* 速度控制功能码 */
+    frame[2] = (speed_rpm < 0) ? 0x01 : 0x00;   /* 00=顺时针, 01=逆时针 */
     frame[3] = (uint8_t)((speed_abs >> 8) & 0xFF);
     frame[4] = (uint8_t)(speed_abs & 0xFF);
-    frame[5] = accel;                           /* Acceleration */
-    frame[6] = 0x00;           /* Sync flag (0=execute immediately) */
+    frame[5] = accel;                           /* 加速度 */
+    frame[6] = 0x00;           /* 同步标志 (0=立即执行) */
 
 #if EMM_USE_MODBUS_CRC
     uint16_t crc = emm_crc16(frame, 7);
-    frame[7] = (uint8_t)(crc & 0xFF);        /* CRC low */
-    frame[8] = (uint8_t)((crc >> 8) & 0xFF); /* CRC high */
+    frame[7] = (uint8_t)(crc & 0xFF);        /* CRC 低字节 */
+    frame[8] = (uint8_t)((crc >> 8) & 0xFF); /* CRC 高字节 */
 
     HAL_UART_Transmit(huart, frame, 9, 20);
 #else
@@ -53,9 +52,9 @@ void emm_send_speed(UART_HandleTypeDef *huart, uint8_t addr, int16_t speed_rpm, 
 #endif
 }
 
-/* ========== Stop motor (0xFE) ==========
- * addr: motor address
- * lock: true=lock rotor, false=free rotor
+/* ========== 停止电机 (0xFE) ==========
+ * addr: 电机地址
+ * lock: true=锁定转子, false=释放转子
  */
 void emm_stop(UART_HandleTypeDef *huart, uint8_t addr, bool lock)
 {
@@ -65,9 +64,9 @@ void emm_stop(UART_HandleTypeDef *huart, uint8_t addr, bool lock)
     uint8_t frame[5];
 #endif
     frame[0] = addr;
-    frame[1] = 0xFE;  /* Stop command */
-    frame[2] = 0x98;  /* Sub-command for stop */
-    frame[3] = 0x00;  /* Sync flag (0=execute immediately) */
+    frame[1] = 0xFE;  /* 停止指令 */
+    frame[2] = 0x98;  /* 停止子指令 */
+    frame[3] = 0x00;  /* 同步标志 (0=立即执行) */
 
 #if EMM_USE_MODBUS_CRC
     uint16_t crc = emm_crc16(frame, 4);
@@ -83,7 +82,7 @@ void emm_stop(UART_HandleTypeDef *huart, uint8_t addr, bool lock)
     (void)lock;
 }
 
-/* Convert m/s to RPM for Emm_V5.0 */
+/* 将 m/s 转换为 Emm_V5.0 的 RPM 指令值 */
 static int16_t speed_to_cmd(float speed_ms)
 {
     /* v = 2*pi*R*RPM/60  =>  RPM = v*60/(2*pi*R) */
@@ -94,25 +93,25 @@ static int16_t speed_to_cmd(float speed_ms)
     return cmd;
 }
 
-/* ========== Set chassis velocity using Mecanum kinematics ========== */
+/* ========== 麦卡纳姆轮运动学解算 - 设置底盘速度 ========== */
 void chassis_set_velocity(float vx, float vy, float wz)
 {
     float L = CHASSIS_WHEEL_TRACK;
     float B = CHASSIS_WHEEL_BASE;
 
-    /* Mecanum inverse kinematics */
+    /* 麦卡纳姆轮逆运动学 */
     float v_fl = vx - vy - (L + B) * wz;
     float v_fr = vx + vy + (L + B) * wz;
     float v_rl = vx + vy - (L + B) * wz;
     float v_rr = vx - vy + (L + B) * wz;
 
-    /* Convert to motor commands and send */
+    /* 转换为电机指令并发送 */
     int16_t s_fl = speed_to_cmd(v_fl);
     int16_t s_fr = speed_to_cmd(v_fr);
     int16_t s_rl = speed_to_cmd(v_rl);
     int16_t s_rr = speed_to_cmd(v_rr);
 
-    /* Send commands to each motor (acceleration=10) */
+    /* 向各电机发送指令 (加速度=10) */
     emm_send_speed(&huart2, MOTOR_ADDR_FL, s_fl, 10);
     emm_send_speed(&huart2, MOTOR_ADDR_FR, s_fr, 10);
     emm_send_speed(&huart2, MOTOR_ADDR_RL, s_rl, 10);
@@ -128,7 +127,7 @@ void chassis_stop(void)
     chassis_velocity.vx = 0;
     chassis_velocity.vy = 0;
     chassis_velocity.wz = 0;
-    emm_stop(&huart2, 0x00, true);  /* Broadcast stop, lock rotor */
+    emm_stop(&huart2, 0x00, true);  /* 广播停止, 锁定转子 */
 }
 
 void chassis_stop_all(void)

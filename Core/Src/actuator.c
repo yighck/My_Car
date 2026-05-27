@@ -3,20 +3,20 @@
 
 void actuator_init(void)
 {
-    /* Start PWM on TIM3 CH3 (gripper rotate) and CH4 (tray) */
+    /* 启动 TIM3 CH3 (夹爪旋转) 和 CH4 (托盘) 的 PWM */
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
 
-    /* Start PWM on TIM8 CH4 (gripper open/close) */
+    /* 启动 TIM8 CH4 (夹爪开合) 的 PWM */
     HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_4);
 
-    /* Set default positions */
+    /* 设置默认位置 */
     gripper_rotate_set_angle(GRIPPER_ROTATE_CENTER);
     tray_set_angle(TRAY_SLOT_0);
     gripper_set_angle(GRIPPER_ANGLE_OPEN);
 }
 
-/* ========== Servo Control ========== */
+/* ========== 舵机控制函数 ========== */
 void servo_set_angle(TIM_HandleTypeDef *htim, uint32_t channel, float angle)
 {
     if (angle < 0.0f) angle = 0.0f;

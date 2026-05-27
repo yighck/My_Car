@@ -11,7 +11,7 @@
 #define M_PI 3.14159265358979323846f
 #endif
 
-/* ========== Hardware Handles (defined in main.c) ========== */
+/* ========== 硬件句柄 (在 main.c 中定义) ========== */
 extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim8;
 extern UART_HandleTypeDef huart1;
@@ -21,25 +21,25 @@ extern UART_HandleTypeDef huart4;
 extern UART_HandleTypeDef huart5;
 extern UART_HandleTypeDef huart6;
 
-/* ========== Timer Channel Defines ========== */
-/* TIM3 clock is 84MHz, TIM8 clock is 168MHz with the current clock tree. */
+/* ========== 定时器通道定义 ========== */
+/* TIM3 时钟 84MHz, TIM8 时钟 168MHz (当前时钟树配置) */
 #define SERVO_TIM3_PRESCALER  83
 #define SERVO_TIM8_PRESCALER  167
 #define SERVO_TIM_PERIOD      19999 /* 1MHz/(19999+1)=50Hz */
 
-#define SERVO_MIN_PULSE       500   /* 0.5ms = 0 degree   */
-#define SERVO_MAX_PULSE       2500  /* 2.5ms = 180 degree */
-#define SERVO_CENTER_PULSE    1500  /* 1.5ms = 90 degree  */
+#define SERVO_MIN_PULSE       500   /* 0.5ms = 0°   */
+#define SERVO_MAX_PULSE       2500  /* 2.5ms = 180° */
+#define SERVO_CENTER_PULSE    1500  /* 1.5ms = 90°  */
 #define SERVO_MAX_ANGLE       270   /* 支持270°舵机 */
 
-/* ========== Servo Angle Macros ========== */
+/* ========== 舵机角度宏 ========== */
 #define ANGLE_TO_PULSE(angle) \
     (SERVO_MIN_PULSE + (uint16_t)((angle) * (SERVO_MAX_PULSE - SERVO_MIN_PULSE) / (float)SERVO_MAX_ANGLE))
 
-/* ========== UART Ring Buffer Size ========== */
+/* ========== 串口接收缓冲区大小 ========== */
 #define UART_RX_BUF_SIZE  256
 
-/* ========== UART Ring Buffer Structure ========== */
+/* ========== 串口接收缓冲区结构体 ========== */
 typedef struct {
     uint8_t  data[UART_RX_BUF_SIZE];
     volatile uint16_t head;
@@ -54,7 +54,7 @@ extern uart_ring_buf_t uart4_rx_buf;  /* UART4:  串口屏 */
 extern uart_ring_buf_t uart5_rx_buf;  /* UART5:  二维码模块 */
 extern uart_ring_buf_t uart6_rx_buf;  /* USART6: 调试串口 */
 
-/* ========== Ring Buffer Operations ========== */
+/* ========== 环形缓冲区操作 ========== */
 static inline void ring_buf_init(uart_ring_buf_t *buf)
 {
     buf->head = 0;
@@ -87,7 +87,7 @@ static inline uint16_t ring_buf_count(uart_ring_buf_t *buf)
     return (buf->head - buf->tail + UART_RX_BUF_SIZE) % UART_RX_BUF_SIZE;
 }
 
-/* ========== Utility Functions ========== */
+/* ========== 工具函数 ========== */
 static inline float clampf(float val, float min, float max)
 {
     if (val < min) return min;

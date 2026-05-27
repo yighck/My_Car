@@ -8,7 +8,7 @@ void vision_init(void)
     vision_current.detected = false;
 }
 
-/* Parse a complete vision response frame */
+/* 解析一个完整的视觉响应帧 */
 static bool vision_parse_frame(uint8_t *frame, uint16_t len)
 {
     if (len < 4) return false;
@@ -51,7 +51,7 @@ static bool vision_parse_frame(uint8_t *frame, uint16_t len)
     return false;
 }
 
-/* Process incoming vision data from UART1 ring buffer */
+/* 从 UART1 环形缓冲区解析视觉数据 */
 void vision_process(void)
 {
     static uint8_t frame_buf[32];
@@ -82,7 +82,7 @@ void vision_process(void)
     }
 }
 
-/* Send command to Linux vision */
+/* 向 Linux 视觉端发送指令 */
 static void vision_send_cmd(uint8_t cmd, uint8_t *data, uint8_t data_len)
 {
     uint8_t frame[16];
@@ -95,7 +95,7 @@ static void vision_send_cmd(uint8_t cmd, uint8_t *data, uint8_t data_len)
         frame[idx++] = data[i];
     }
 
-    /* Checksum: XOR of CMD + DATA */
+    /* 校验和: CMD + DATA 的异或值 */
     uint8_t check = cmd;
     for (uint8_t i = 0; i < data_len; i++) {
         check ^= data[i];

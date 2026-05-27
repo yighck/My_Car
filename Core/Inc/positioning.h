@@ -3,12 +3,12 @@
 
 #include "common.h"
 
-/* ========== OPS9 Position Data ========== */
+/* ========== OPS9 位置数据 ========== */
 typedef struct {
-    float x;        /* Global X (m)     */
-    float y;        /* Global Y (m)     */
-    float angle;    /* Heading (rad)    */
-    bool  valid;    /* Data valid flag  */
+    float x;        /* 全局 X (m)     */
+    float y;        /* 全局 Y (m)     */
+    float angle;    /* 航向角 (rad)    */
+    bool  valid;    /* 数据有效标志  */
     uint32_t timestamp;
 } pos_data_t;
 
@@ -26,12 +26,12 @@ typedef struct {
 #define OPS9_FRAME_LEN      28
 #define OPS9_BAUD_RATE      115200
 
-/* ========== Functions ========== */
+/* ========== 函数声明 ========== */
 void positioning_init(void);
 void positioning_process(void);
 bool positioning_is_valid(void);
 
-/* ========== Data ========== */
+/* ========== 数据 ========== */
 extern pos_data_t pos_current;
 
 #endif /* __POSITIONING_H */
