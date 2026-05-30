@@ -30,7 +30,6 @@
 #include "qrcode.h"
 #include "task.h"
 #include "obstacle.h"
-#include "debug.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -163,9 +162,6 @@ int main(void)
   HAL_UART_Receive_IT(&huart4, &uart4_rx_byte, 1);
   HAL_UART_Receive_IT(&huart5, &uart5_rx_byte, 1);
   HAL_UART_Receive_IT(&huart6, &uart6_rx_byte, 1);
-
-  /* 初始化调试日志 (USART6 TX) */
-  debug_init();
 
   /* 初始化各模块 */
   chassis_init();

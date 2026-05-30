@@ -1,5 +1,4 @@
 #include "task.h"
-#include "debug.h"
 #include <stdio.h>
 
 #define NAV_ALIGN_TIMEOUT_MS   2000U
@@ -631,7 +630,6 @@ void task_update(void)
         if (state_timed_out()) {
             saved_error_state = task_state;
             last_error = ERR_STATE_TIMEOUT;
-            LOG_ERR("TASK", "State %d timeout %lu ms", task_state, get_state_timeout(task_state));
             enter_state(TASK_ERROR);
             return;
         }
@@ -671,7 +669,6 @@ void task_update(void)
             /* 10秒无QR码 → 超时错误 */
             saved_error_state = task_state;
             last_error = ERR_QR_TIMEOUT;
-            LOG_ERR("TASK", "QR code scan timeout");
             enter_state(TASK_ERROR);
         }
         break;
@@ -815,8 +812,6 @@ void task_update(void)
         static bool error_logged = false;
 
         if (!error_logged) {
-            LOG_ERR("TASK", "Error %d in state %d step %d",
-                    last_error, saved_error_state, action_step);
             error_logged = true;
             error_entry_tick = HAL_GetTick();
         }
@@ -847,12 +842,9 @@ void task_update(void)
             last_error = ERR_NONE;
             switch (action) {
             case RECOVERY_RETRY:
-                LOG_INFO("TASK", "Recovery: retry state %d", saved_error_state);
                 enter_state(saved_error_state);
                 break;
             case RECOVERY_SKIP_VISION:
-                LOG_INFO("TASK", "Recovery: skip vision, state %d step %d",
-                         saved_error_state, saved_vision_skip_step);
                 task_state = saved_error_state;
                 action_step = saved_vision_skip_step;
                 state_enter_tick = HAL_GetTick();
@@ -861,7 +853,6 @@ void task_update(void)
                 break;
             case RECOVERY_ABORT_TASK:
             default:
-                LOG_WARN("TASK", "Recovery: abort to DONE");
                 enter_state(TASK_DONE);
                 break;
             }

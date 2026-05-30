@@ -1,6 +1,5 @@
 #include "navigation.h"
 #include "chassis.h"
-#include "debug.h"
 
 pid_t pid_linear  = {0};
 pid_t pid_angular = {0};
@@ -186,7 +185,6 @@ void nav_update(void)
         chassis_stop();
         nav_state = NAV_FAILED;
         nav_error = ERR_NAV_TIMEOUT;
-        LOG_WARN("NAV", "Timeout after %lu ms", (unsigned long)NAV_TIMEOUT_MS);
         return;
     }
 
@@ -198,7 +196,6 @@ void nav_update(void)
             chassis_stop();
             nav_state = NAV_FAILED;
             nav_error = ERR_NAV_POS_LOST;
-            LOG_WARN("NAV", "Position lost > %lu ms", (unsigned long)NAV_POS_LOST_TIMEOUT);
             return;
         }
         return;  /* 等待定位恢复 (在容忍时间内) */
