@@ -30,6 +30,7 @@
 #include "qrcode.h"
 #include "task.h"
 #include "obstacle.h"
+#include "debug.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -162,6 +163,9 @@ int main(void)
   HAL_UART_Receive_IT(&huart4, &uart4_rx_byte, 1);
   HAL_UART_Receive_IT(&huart5, &uart5_rx_byte, 1);
   HAL_UART_Receive_IT(&huart6, &uart6_rx_byte, 1);
+
+  /* 初始化调试日志 (USART6 TX) */
+  debug_init();
 
   /* 初始化各模块 */
   chassis_init();
@@ -620,6 +624,17 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         ring_buf_put(&uart6_rx_buf, uart6_rx_byte);
         HAL_UART_Receive_IT(&huart6, &uart6_rx_byte, 1);
     }
+}
+
+/* UART错误回调 - 通信出错时重新启动接收 */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART1) HAL_UART_Receive_IT(&huart1, &uart1_rx_byte, 1);
+    else if (huart->Instance == USART2) HAL_UART_Receive_IT(&huart2, &uart2_rx_byte, 1);
+    else if (huart->Instance == USART3) HAL_UART_Receive_IT(&huart3, &uart3_rx_byte, 1);
+    else if (huart->Instance == UART4) HAL_UART_Receive_IT(&huart4, &uart4_rx_byte, 1);
+    else if (huart->Instance == UART5) HAL_UART_Receive_IT(&huart5, &uart5_rx_byte, 1);
+    else if (huart->Instance == USART6) HAL_UART_Receive_IT(&huart6, &uart6_rx_byte, 1);
 }
 /* USER CODE END 4 */
 

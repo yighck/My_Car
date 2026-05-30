@@ -8,6 +8,7 @@
 #include "vision.h"
 #include "navigation.h"
 #include "qrcode.h"
+#include "error_code.h"
 
 /* ========== 任务状态机 ========== */
 typedef enum {
@@ -46,7 +47,10 @@ typedef enum {
 
     /* 返回 */
     TASK_RETURN_HOME,
-    TASK_DONE
+    TASK_DONE,
+
+    /* 错误恢复 */
+    TASK_ERROR
 } task_state_t;
 
 /* ========== 场地坐标 (米) ========== */
@@ -111,9 +115,16 @@ typedef struct {
 
 extern task_stats_t task_stats;
 
+/* ========== 状态超时配置 ========== */
+typedef struct {
+    task_state_t state;
+    uint32_t     timeout_ms;    /* 0 = 不超时 */
+} state_timeout_t;
+
 /* ========== 函数声明 ========== */
 void task_init(void);
 void task_update(void);
 task_state_t task_get_state(void);
+error_code_t task_get_last_error(void);
 
 #endif /* __TASK_H */
