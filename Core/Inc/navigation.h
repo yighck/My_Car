@@ -49,14 +49,6 @@ typedef enum {
     NAV_FAILED       /* 导航失败 (超时/定位丢失) */
 } nav_state_t;
 
-/* ========== 导航参数 ========== */
-#define NAV_POS_TOLERANCE     0.02f   /* 位置容差 (m) */
-#define NAV_ANGLE_TOLERANCE   0.05f   /* 角度容差 (rad) */
-#define NAV_MAX_LINEAR_SPEED  0.3f    /* 最大线速度 (m/s) */
-#define NAV_MAX_ANGULAR_SPEED 1.5f    /* 最大角速度 (rad/s) */
-#define NAV_TIMEOUT_MS        10000U  /* 导航超时 (ms) */
-#define NAV_POS_LOST_TIMEOUT  1000U   /* 定位丢失超时 (ms) */
-
 /* ========== 路径点 ========== */
 typedef struct {
     float x;

@@ -64,9 +64,9 @@ void emm_stop(UART_HandleTypeDef *huart, uint8_t addr, bool lock)
     uint8_t frame[5];
 #endif
     frame[0] = addr;
-    frame[1] = 0xFE;  /* 停止指令 */
-    frame[2] = 0x98;  /* 停止子指令 */
-    frame[3] = 0x00;  /* 同步标志 (0=立即执行) */
+    frame[1] = 0xFE;             /* 停止指令 */
+    frame[2] = lock ? 0x99 : 0x98;  /* 0x99=锁定转子, 0x98=释放转子 */
+    frame[3] = 0x00;             /* 同步标志 (0=立即执行) */
 
 #if EMM_USE_MODBUS_CRC
     uint16_t crc = emm_crc16(frame, 4);
@@ -78,8 +78,6 @@ void emm_stop(UART_HandleTypeDef *huart, uint8_t addr, bool lock)
     frame[4] = 0x6B;
     HAL_UART_Transmit(huart, frame, 5, 10);
 #endif
-
-    (void)lock;
 }
 
 /* 将 m/s 转换为 Emm_V5.0 的 RPM 指令值 */
