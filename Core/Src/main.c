@@ -30,6 +30,16 @@
 #include "qrcode.h"
 #include "task.h"
 #include "obstacle.h"
+#include <stdio.h>
+
+/* 底盘运动测试模式
+ * 用途: 脱离任务流程, 通过蓝牙单独调试底盘运动
+ * 使用: 取消下面这行的注释, 重新编译烧录, 手机蓝牙串口连接后发指令
+ * 关闭: 测试完毕后注释回去, 重新编译即可恢复完整任务流程
+ * 指令: V vx vy wz (速度) / N x y (导航) / S (停车) / ? (查询)
+ */
+// #define CHASSIS_TEST_MODE
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -175,6 +185,21 @@ int main(void)
 
   /* 启动延时 - 等待传感器稳定 */
   HAL_Delay(500);
+
+#ifdef CHASSIS_TEST_MODE
+  /* 测试模式启动提示: 上电后通过蓝牙发送帮助信息 */
+  {
+      const char *banner =
+          "\r\n===== 底盘测试模式 (蓝牙) =====\r\n"
+          "V vx vy wz  速度(m/s,rad/s)\r\n"
+          "N x y       导航到坐标(m)\r\n"
+          "S           停车\r\n"
+          "?           查询状态\r\n"
+          "================================\r\n";
+      HAL_UART_Transmit(&huart6, (uint8_t *)banner, strlen(banner), 100);
+  }
+#endif
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -184,7 +209,11 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+#ifdef CHASSIS_TEST_MODE
+    chassis_test_process();
+#else
     task_update();
+#endif
   }
   /* USER CODE END 3 */
 }
@@ -593,6 +622,106 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+#ifdef CHASSIS_TEST_MODE
+/* ========== 底盘运动测试模式 (蓝牙 USART6) ==========
+ *
+ * 脱离任务流程, 通过蓝牙单独调试底盘运动。
+ * 其他模块 (舵机/升降/视觉等) 不需要蓝牙调试, 不在此模式中。
+ *
+ * 使用步骤:
+ *   1. 取消 main.c 顶部 #define CHASSIS_TEST_MODE 的注释
+ *   2. 编译烧录, 上电后蓝牙自动发送帮助菜单
+ *   3. 手机蓝牙串口助手连接, 发送指令测试底盘
+ *   4. 测试完毕后注释回 #define, 重新编译恢复任务流程
+ *
+ * 支持的指令 (以换行符结尾):
+ *   V vx vy wz  -- 直接速度控制 (持续运动, 直到发 S 停车)
+ *       vx: 前进(+)/后退(-), 单位 m/s, 范围约 +/-0.3
+ *       vy: 左移(+)/右移(-), 单位 m/s
+ *       wz: 逆时针(+)/顺时针(-), 单位 rad/s
+ *   N x y       -- 导航到场地坐标 (自动 PID, 到达后停下)
+ *   S           -- 立即停车
+ *   ?           -- 查询位置和导航状态
+ */
+
+/* 行缓冲区: 逐字节接收蓝牙数据, 遇到换行符解析整行 */
+static char test_line_buf[64];
+static uint8_t test_line_idx = 0;
+
+/* 通过 USART6 发送字符串到蓝牙 */
+static void test_send(const char *str)
+{
+    HAL_UART_Transmit(&huart6, (uint8_t *)str, strlen(str), 100);
+}
+
+/* 解析并执行一条完整的指令行 */
+static void test_handle_line(char *line)
+{
+    char msg[96];
+    char cmd = line[0];
+
+    if (cmd == 'V' || cmd == 'v') {
+        float vx = 0, vy = 0, wz = 0;
+        if (sscanf(line + 1, "%f %f %f", &vx, &vy, &wz) >= 1) {
+            chassis_set_velocity(vx, vy, wz);
+            snprintf(msg, sizeof(msg), "OK V %.2f %.2f %.2f\r\n", vx, vy, wz);
+        } else {
+            snprintf(msg, sizeof(msg), "ERR 格式: V vx vy wz\r\n");
+        }
+    } else if (cmd == 'N' || cmd == 'n') {
+        float x = 0, y = 0;
+        if (sscanf(line + 1, "%f %f", &x, &y) == 2) {
+            nav_goto(x, y);
+            snprintf(msg, sizeof(msg), "OK N %.3f %.3f\r\n", x, y);
+        } else {
+            snprintf(msg, sizeof(msg), "ERR 格式: N x y\r\n");
+        }
+    } else if (cmd == 'S' || cmd == 's') {
+        nav_stop(); chassis_stop();
+        snprintf(msg, sizeof(msg), "OK 停车\r\n");
+    } else if (cmd == '?') {
+        pos_data_t p = pos_current;
+        nav_state_t ns = nav_get_state();
+        const char *st = (ns==NAV_IDLE)?"IDLE":(ns==NAV_RUNNING)?"RUNNING":
+                         (ns==NAV_REACHED)?"REACHED":(ns==NAV_PAUSED)?"PAUSED":
+                         (ns==NAV_FAILED)?"FAILED":"?";
+        snprintf(msg, sizeof(msg), "POS %.3f %.3f %.1fdeg %s | NAV %s\r\n",
+                 p.x, p.y, p.angle*180.0f/M_PI, p.valid?"OK":"LOST", st);
+    } else {
+        /* 未知指令: 打印帮助 */
+        snprintf(msg, sizeof(msg),
+                 "ERR 未知. 用法:\r\n"
+                 "  V vx vy wz  速度控制\r\n"
+                 "  N x y       导航到坐标\r\n"
+                 "  S           停车\r\n"
+                 "  ?           查询状态\r\n");
+    }
+    test_send(msg);
+}
+
+/* 主循环调用: 从蓝牙缓冲区逐字节读取, 拼行后解析 */
+static void chassis_test_process(void)
+{
+    /* 从环形缓冲区逐字节读取, 遇换行触发解析 */
+    while (!ring_buf_empty(&uart6_rx_buf)) {
+        char ch = (char)ring_buf_get(&uart6_rx_buf);
+        if (ch == '\n' || ch == '\r') {
+            if (test_line_idx > 0) {
+                test_line_buf[test_line_idx] = '\0';
+                test_handle_line(test_line_buf);
+                test_line_idx = 0;
+            }
+        } else if (test_line_idx < sizeof(test_line_buf) - 1) {
+            test_line_buf[test_line_idx++] = ch;
+        }
+    }
+
+    /* N 指令启动的导航需要周期调用 nav_update() 才能推进 */
+    nav_update();
+}
+#endif /* CHASSIS_TEST_MODE */
+
 /* 串口接收完成回调 - 将字节存入环形缓冲区并重新启动接收 */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
