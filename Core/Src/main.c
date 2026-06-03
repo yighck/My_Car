@@ -74,7 +74,7 @@ uart_ring_buf_t uart2_rx_buf;  /* USART2: 底盘电机+升降电机 */
 uart_ring_buf_t uart3_rx_buf;  /* USART3: OPS9定位 */
 uart_ring_buf_t uart4_rx_buf;  /* UART4:  串口屏 */
 uart_ring_buf_t uart5_rx_buf;  /* UART5:  二维码模块 */
-uart_ring_buf_t uart6_rx_buf;  /* USART6: 调试串口 */
+uart_ring_buf_t uart6_rx_buf;  /* USART6: 避障传感器 (STP-23L) */
 
 /* 每个串口的单字节接收缓冲区 */
 uint8_t uart1_rx_byte;
@@ -190,12 +190,13 @@ int main(void)
   /* 测试模式启动提示: 上电后通过蓝牙发送帮助信息 */
   {
       const char *banner =
-          "\r\n===== 底盘测试模式 (蓝牙) =====\r\n"
+          "\r\n===== 底盘测试模式 =====\r\n"
           "V vx vy wz  速度(m/s,rad/s)\r\n"
           "N x y       导航到坐标(m)\r\n"
           "S           停车\r\n"
-          "?           查询状态\r\n"
-          "================================\r\n";
+          "?           查询位置/导航\r\n"
+          "D           查询避障距离\r\n"
+          "============================\r\n";
       HAL_UART_Transmit(&huart6, (uint8_t *)banner, strlen(banner), 100);
   }
 #endif
@@ -581,7 +582,7 @@ static void MX_USART6_UART_Init(void)
 
   /* USER CODE END USART6_Init 1 */
   huart6.Instance = USART6;
-  huart6.Init.BaudRate = 115200;
+  huart6.Init.BaudRate = 230400;   /* STP-23L 激光测距传感器要求 230400 */
   huart6.Init.WordLength = UART_WORDLENGTH_8B;
   huart6.Init.StopBits = UART_STOPBITS_1;
   huart6.Init.Parity = UART_PARITY_NONE;
@@ -688,14 +689,21 @@ static void test_handle_line(char *line)
                          (ns==NAV_FAILED)?"FAILED":"?";
         snprintf(msg, sizeof(msg), "POS %.3f %.3f %.1fdeg %s | NAV %s\r\n",
                  p.x, p.y, p.angle*180.0f/M_PI, p.valid?"OK":"LOST", st);
+    } else if (cmd == 'D' || cmd == 'd') {
+        /* 查询避障传感器距离 */
+        uint16_t dist = obstacle_get_distance();
+        bool det = obstacle_detected();
+        snprintf(msg, sizeof(msg), "DIST=%umm %s\r\n",
+                 dist, det ? "< 障碍!" : "安全");
     } else {
         /* 未知指令: 打印帮助 */
         snprintf(msg, sizeof(msg),
                  "ERR 未知. 用法:\r\n"
-                 "  V vx vy wz  速度控制\r\n"
+                 "  V vx wy wz  速度控制\r\n"
                  "  N x y       导航到坐标\r\n"
                  "  S           停车\r\n"
-                 "  ?           查询状态\r\n");
+                 "  ?           查询位置\r\n"
+                 "  D           查询避障\r\n");
     }
     test_send(msg);
 }
@@ -717,7 +725,8 @@ static void chassis_test_process(void)
         }
     }
 
-    /* N 指令启动的导航需要周期调用 nav_update() 才能推进 */
+    /* 周期性更新: 避障数据采集 + 导航PID */
+    obstacle_process();
     nav_update();
 }
 #endif /* CHASSIS_TEST_MODE */

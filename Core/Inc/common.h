@@ -52,7 +52,7 @@ extern uart_ring_buf_t uart2_rx_buf;  /* USART2: 底盘电机+升降电机 */
 extern uart_ring_buf_t uart3_rx_buf;  /* USART3: OPS9定位 */
 extern uart_ring_buf_t uart4_rx_buf;  /* UART4:  串口屏 */
 extern uart_ring_buf_t uart5_rx_buf;  /* UART5:  二维码模块 */
-extern uart_ring_buf_t uart6_rx_buf;  /* USART6: 调试串口 */
+extern uart_ring_buf_t uart6_rx_buf;  /* USART6: 避障传感器 (STP-23L) */
 
 /* ========== 环形缓冲区操作 ========== */
 static inline void ring_buf_init(uart_ring_buf_t *buf)
